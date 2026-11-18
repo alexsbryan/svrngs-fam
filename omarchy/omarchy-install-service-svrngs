@@ -7,7 +7,7 @@ echo -e "\nInstalling svrngs..."
 omarchy-pkg-add svrngs-bin svrngs-fam
 
 echo -e "\nStarting svrngs..."
-/usr/share/svrngs/setup-user
+/usr/share/svrngs-fam/setup-svrngs
 
 echo -e "\nAdding svrngs to the bar..."
 /usr/share/svrngs-fam/setup-user

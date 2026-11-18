@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -I
-"""svrngs-bin's setup-user and packaging/arch/bump, in scratch directories.
+"""setup-svrngs and packaging/arch/bump, in scratch directories.
 
-setup-user moves an install made by svrngs's own install line aside, never
+setup-svrngs moves an install made by svrngs's own install line aside, never
 deleting it and never touching ~/.svrngs, and starts the packaged service;
 systemctl is stood in for, so nothing reaches this computer's own svrngs.
 bump copies svrngs-bin from a scratch svrngs's packaging/arch, swapping in
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP = ROOT / "packaging/arch/svrngs-bin/setup-user"
+SETUP = ROOT / "setup-svrngs"
 failures = []
 
 

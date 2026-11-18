@@ -1,9 +1,9 @@
 [Unit]
 Description=svrngs
+
 [Service]
 ExecStart=/usr/bin/svrngs
-Environment=SVRNGS_DIR=%h/.svrngs
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 Restart=on-failure
+
 [Install]
 WantedBy=default.target

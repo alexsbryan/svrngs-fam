@@ -54,5 +54,10 @@ export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svr
 
 The first builds `svrngs-give-bin` beside `svrngs-bin`, as svrngs's does.
 
+`setup-svrngs` moves an install made by svrngs's install line or by Get
+svrngs aside, and starts the packaged svrngs in its place. It's the
+plugin's, not svrngs's, so the `svrngs-fam` package is to install it as
+`/usr/share/svrngs-fam/setup-svrngs`; 0.2.1 predates it.
+
 `omarchy/` has drafts of `omarchy install service svrngs` and its removal,
 for proposing to Omarchy.
