@@ -1,6 +1,7 @@
 import Quickshell
 import QtQuick
 import qs.Commons as Commons
+import "Model.js" as Model
 
 // The bar widget's own decisions, with no compositor: what the icon shows for
 // each state the helper can answer, and that the helper runs only at start
@@ -27,6 +28,20 @@ ShellRoot {
     }
 
     readonly property var fam: barPanel.service
+    readonly property var running: ({
+      svrngs: "running",
+      groups: [
+        { id: "g1", name: "WorkingGroup", person: "LittleMac", left: false },
+        { id: "g2", name: "<b>Family</b>", person: "Alex", left: false },
+        { id: "g3", name: "Old", person: "LittleMac", left: true }
+      ],
+      mine: [{ name: "notes", port: 3001, groups: ["g1"] }],
+      lends: { g1: { lent: [
+        { person: "Fedora", name: "deepseek-flash", kind: "spot", origin: "http://abc123.localhost:41097/" },
+        { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/" }
+      ] } },
+      listeners: [{ port: 3000, program: "puma", name: "garden", pid: 1 }]
+    })
     readonly property string group: "󰡉"
     readonly property string outline: "󰭘"
 
@@ -85,16 +100,23 @@ ShellRoot {
       check("a warning", fam.look.warning, true)
       check("not lit", same(barPanel.barIconColor, dim), true)
       check("no count", fam.badge, "")
-      check("the panel says why", barPanel.lines()[0], "svrngs's answer couldn't be read: /v1/groups answered 500: the record could not be read")
+      check("the tooltip says so", barPanel.tooltip, "svrngs's answer couldn't be read")
+      check("the panel lists nothing", barPanel.groups.length + barPanel.offers.length + barPanel.lent.length, 0)
 
       console.log("an answer the plugin does not know")
       show({ svrngs: "paused" })
       check("a state outside the set is unreadable", fam.state, "unreadable")
-      check("and says what it was", barPanel.lines()[0], "svrngs's answer couldn't be read: the helper said svrngs is \"paused\"")
+      check("and says what it was", fam.answer.reason, "the helper said svrngs is \"paused\"")
       show("Traceback (most recent call last):")
       check("words that are not JSON are unreadable", fam.state, "unreadable")
-      show({ svrngs: "running", groups: [{ id: "g", name: "<b>Bold</b>", person: "Ana", left: false }] })
-      check("a group's name stays its characters", barPanel.lines()[2], "<b>Bold</b>, as Ana")
+
+      console.log("the panel's lists")
+      show(running)
+      check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
+      check("what is offered", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden" }]))
+      check("what is lent, with its groups' names", JSON.stringify(barPanel.lent), JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"] }]))
+      var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
+      check("a group's lends from others, not yours", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label })), JSON.stringify(["Fedora:abc123"]))
 
       console.log("nothing runs while the panel is closed")
       readsWhenClosed = fam.reads
@@ -120,7 +142,73 @@ ShellRoot {
         harness.check("read once on open", harness.fam.reads, harness.readsWhenClosed + 1)
         barPanel.close()
         harness.check("closing stops asking", harness.fam.wanted, false)
-        console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+        harness.actions()
+      }
+    }
+
+    function actions() {
+      show(running)
+      console.log("lend: nothing happens on the first press")
+      barPanel.askLend(barPanel.offers[0])
+      check("the second press is waited for", (barPanel.lending || {}).port, 3000)
+      check("nothing ran", fam.doing, "")
+      check("its name is offered", barPanel.lendName, "garden")
+      check("the first group is chosen", barPanel.lendGroup, "g1")
+      barPanel.lending = null
+      check("Cancel lends nothing", fam.doing, "")
+
+      console.log("lend: the second press")
+      barPanel.askLend(barPanel.offers[0])
+      barPanel.lendName = "My Garden!"
+      barPanel.lendGroup = "g2"
+      barPanel.lend()
+      check("svrngs is asked to lend it, as named, to the group chosen, saying the program",
+            JSON.stringify(fam.lastAsked), JSON.stringify(["share", "3000", "g2", "my-garden", "--program", "puma"]))
+      check("the confirm closes", barPanel.lending, null)
+      check("it runs", fam.doing, "lend")
+      barPanel.stop("notes")
+      check("a second action waits for the first", JSON.stringify(fam.lastAsked[0]), JSON.stringify("share"))
+      settle.then = harness.afterLend
+      settle.start()
+    }
+
+    function afterLend() {
+      // The harness's home has no svrngs, so the real helper says so.
+      check("svrngs's answer is said", fam.said, "svrngs is not installed on this computer")
+      check("as a failure", fam.saidOk, false)
+
+      console.log("invite: a second press too")
+      barPanel.inviting = "g1"
+      check("asking runs nothing", fam.doing, "")
+      barPanel.invite("g1")
+      check("a new link is asked of svrngs", JSON.stringify(fam.lastAsked), JSON.stringify(["link", "g1"]))
+      check("the question closes", barPanel.inviting, "")
+      settle.then = harness.afterInvite
+      settle.start()
+    }
+
+    function afterInvite() {
+      console.log("open")
+      barPanel.openLend("abc123")
+      check("a friend's lend opens by its label", JSON.stringify(fam.lastAsked), JSON.stringify(["open", "--lend", "abc123"]))
+      settle.then = harness.finish
+      settle.start()
+    }
+
+    function finish() {
+      console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+    }
+
+    // Waits for the action in flight to end, then goes on.
+    Timer {
+      id: settle
+      property var then: null
+      interval: 100
+      repeat: true
+      onTriggered: {
+        if (harness.fam.doing !== "") return
+        stop()
+        then()
       }
     }
   }

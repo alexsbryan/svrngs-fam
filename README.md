@@ -7,7 +7,7 @@ and the build order are in svrn-docs `rings/current/OMARCHY_PLUGIN.md`.
 | File | What it does |
 |---|---|
 | `manifest.json` | The plugin, `svrngs.fam`, a bar widget for the right section |
-| `Panel.qml` | The icon, its tooltip and the panel |
+| `Panel.qml` | The icon, its tooltip, and the panel: what runs here with **Lend** (always a second press) and what you lend with **Stop**; your people's models with **Copy address**; your groups with **Invite** and **Open** |
 | `Service.qml` | svrngs's state: one read at start, a file event at each svrngs start, the lends folder counted with no process, and a survey every 5 s only while the panel is open |
 | `Model.js` | What the icon shows for each answer |
 | `bin/svrngs-fam` | The helper. Every read and action goes through it; it alone reads svrngs's token |

@@ -10,8 +10,11 @@ Verbs:
                                   lends and what listens on this computer
   share <port> <group> <name> [--program <kind>] [--password-stdin]
   unshare <name> [--group <group>]
+  models                          friends' lends that answer OpenAI's
+                                  v1/models, each with the address to use
   open [--lend <label>] [--at <path>]
-  link <group>
+                                  opens it in the browser, signed in
+  link <group>                    makes a new invite link and copies it
 
 It reads svrngs's public surface only: the `svrngs` command, the `api` and
 `token` files in svrngs's data directory, and the `/v1/` routes behind the
@@ -27,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 MAX_BODY = 256 * 1024
@@ -146,7 +150,13 @@ def own_lends(root):
         except (OSError, ValueError):
             found.append({"name": text(path.stem), "port": None, "readable": False})
             continue
-        found.append({"name": text(path.stem), "port": port_of(declared), "readable": True})
+        groups = declared.get("groups") if isinstance(declared, dict) else None
+        found.append({
+            "name": text(path.stem),
+            "port": port_of(declared),
+            "groups": [text(g) for g in groups if isinstance(g, str)][:MAX_ROWS] if isinstance(groups, list) else [],
+            "readable": True,
+        })
     return rows(found)[0]
 
 
@@ -195,8 +205,41 @@ def listeners(skip_ports):
         name = proc.group("name")
         if port in skip_ports or port in DENY_PORTS or port in ROOM_PORTS or name in DENY_PROGRAMS:
             continue
-        seen.setdefault(port, {"port": port, "program": text(name), "pid": int(proc.group("pid"))})
+        pid = int(proc.group("pid"))
+        program, offered = describe(pid, name)
+        seen.setdefault(port, {"port": port, "program": text(program), "name": offered, "pid": pid})
     return rows(sorted(seen.values(), key=lambda r: r["port"]))[0]
+
+
+# Puma rewrites its process title: `puma 8.1.2 (tcp://127.0.0.1:3000) [garden]`,
+# while `ss` names it `ruby` (S0 (e)).
+TITLE = re.compile(r"(?P<program>[A-Za-z][\w.-]*) [^\[]*\[(?P<name>[^\]]+)\]\s*")
+
+
+def describe(pid, comm):
+    """(program, name to offer) for a listener: from its process title when
+    it names itself, else its command and the folder it runs in."""
+    try:
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        title = argv[0].decode(errors="replace").strip()
+    except OSError:
+        title = ""
+    named = TITLE.fullmatch(title)
+    if named:
+        return named.group("program"), lend_name(named.group("name"), comm)
+    try:
+        folder = Path(os.readlink(f"/proc/{pid}/cwd"))
+    except OSError:
+        folder = None
+    if folder is None or folder == Path.home() or folder == Path("/"):
+        return comm, lend_name(comm, comm)
+    return comm, lend_name(folder.name, comm)
+
+
+def lend_name(wanted, fallback):
+    """A name svrngs takes for a lend: letters, digits and dashes."""
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", wanted.lower()).strip("-")[:40].strip("-")
+    return cleaned or re.sub(r"[^a-z0-9-]+", "-", fallback.lower()).strip("-") or "app"
 
 
 def state(full):
@@ -254,7 +297,9 @@ def lends_of(at, secret, namespace):
     }
 
 
-def run_svrngs(args, stdin=""):
+def run_svrngs(args, stdin="", raw=False):
+    """svrngs's reply to a command, as words for the panel; with `raw`, its
+    standard output as printed, too."""
     command = svrngs_command()
     if command is None:
         return {"ok": False, "said": "svrngs is not installed on this computer"}
@@ -262,11 +307,138 @@ def run_svrngs(args, stdin=""):
         done = subprocess.run([command, *args], input=stdin, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         return {"ok": False, "said": "svrngs did not finish within 30 seconds"}
+    if raw:
+        return {"ok": done.returncode == 0, "out": done.stdout, "said": done.stderr.strip()[:4000]}
     # `share` asks for a password on stderr (cli.rs:1009-1033). The question
     # is not part of what svrngs said, so it is taken out whole.
     asked = re.sub(r"If .+? takes a password on each request, .+?\(Enter alone for none\):\s*", "", done.stderr, flags=re.S)
     said = "\n".join(part.strip() for part in (done.stdout, asked) if part.strip())
+    # Lines that tell a terminal user what to type next (`svrngs unshare …`)
+    # are for the terminal; the panel has its own buttons for them.
+    plain = "\n".join(
+        cut for cut in (re.sub(r"[^.\n]*`[^`\n]*`[^.\n]*\.?", "", line).strip() for line in said.splitlines()) if cut
+    )
+    said = plain or said
     return {"ok": done.returncode == 0, "code": done.returncode, "said": said[:4000]}
+
+
+def connected():
+    """(address, token) of a running svrngs, or a reply saying why not."""
+    root = data_dir()
+    try:
+        at = address(root)
+        if at is None:
+            return None, {"ok": False, "said": "svrngs hasn't run on this computer yet"}
+        return (at, token(root)), None
+    except Stopped:
+        return None, {"ok": False, "said": "svrngs isn't running"}
+    except Unreadable as e:
+        return None, {"ok": False, "said": str(e)}
+
+
+def lend_at(origin, port):
+    """The label of a lend's origin, if it is one of svrngs's own on this
+    computer (http://<label>.localhost:<svrngs's port>/), else None. Nothing
+    else is ever sent the token."""
+    match = re.fullmatch(r"http://([a-z0-9]{1,100})\.localhost:(\d{1,5})/", origin or "")
+    if not match or int(match.group(2)) != port:
+        return None
+    return match.group(1)
+
+
+def models():
+    """Friends' lends that answer OpenAI's v1/models through svrngs, asked
+    together, each given 4 s. A lend that does not answer is not a model."""
+    held, refused = connected()
+    if refused:
+        return refused
+    at, secret = held
+    try:
+        groups = [g for g in rows(ask(at, secret, "GET", "/v1/groups").get("groups"))[0] if isinstance(g, dict) and not g.get("left")]
+    except (Stopped, Unreadable) as e:
+        return {"ok": False, "said": str(e) or "svrngs isn't running"}
+    candidates = {}
+    for g in groups:
+        me = g.get("person")
+        try:
+            lent = rows(ask(at, secret, "GET", f"/v1/lends?namespace={g.get('id')}", timeout=LENDS_TIMEOUT).get("lent"))[0]
+        except (Stopped, Unreadable):
+            continue
+        for l in lent:
+            if not isinstance(l, dict) or l.get("person") == me:
+                continue
+            label = lend_at(l.get("origin"), at[1])
+            if label and label not in candidates:
+                candidates[label] = {
+                    "person": text(l.get("person")),
+                    "name": text(l.get("name")),
+                    "group": text(g.get("name")),
+                    "label": label,
+                    "address": l["origin"] + "v1",
+                }
+
+    def probe(label):
+        conn = http.client.HTTPConnection(at[0], at[1], timeout=4)
+        try:
+            conn.request("GET", "/v1/models", headers={"Host": f"{label}.localhost:{at[1]}", "Authorization": f"Bearer {secret}"})
+            reply = conn.getresponse()
+            raw = reply.read(MAX_BODY + 1)
+            if reply.status != 200 or len(raw) > MAX_BODY:
+                return None
+            listed = json.loads(raw).get("data")
+            ids = [text(m.get("id")) for m in listed if isinstance(m, dict) and m.get("id")] if isinstance(listed, list) else None
+            return ids[:MAX_ROWS] if ids else None
+        except (OSError, http.client.HTTPException, ValueError, AttributeError):
+            return None
+        finally:
+            conn.close()
+
+    found = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for label, ids in zip(candidates, pool.map(probe, candidates)):
+            if ids:
+                found.append({**candidates[label], "models": ids})
+    return {"ok": True, "models": found}
+
+
+def open_in_browser(body):
+    """A one-time address from svrngs, opened in the browser here. The
+    address never leaves this helper: it is spent once the page opens."""
+    held, refused = connected()
+    if refused:
+        return refused
+    at, secret = held
+    try:
+        answer = ask(at, secret, "POST", "/v1/open", body)
+    except (Stopped, Unreadable) as e:
+        return {"ok": False, "said": str(e) or "svrngs isn't running"}
+    url = answer.get("open")
+    if not isinstance(url, str) or not re.fullmatch(r"http://[a-z0-9.-]+\.localhost:\d+/\S*", url):
+        return {"ok": False, "said": "svrngs answered no address to open"}
+    browser = shutil.which("omarchy-launch-browser") or shutil.which("xdg-open")
+    if browser is None:
+        return {"ok": False, "said": "no browser to open it in"}
+    subprocess.Popen([browser, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return {"ok": True, "said": "Opened in your browser"}
+
+
+def invite(group):
+    """A new invite link to `group`, copied. svrngs prints the link on its
+    own indented line, and the one to open in a browser after it when the
+    group keeps a page (svrngs cli.rs Printed)."""
+    done = run_svrngs(["link", group], raw=True)
+    if not done["ok"]:
+        return {"ok": False, "said": done["said"] or "svrngs made no link"}
+    links = [line.strip() for line in done["out"].splitlines() if re.fullmatch(r"  \S+", line)]
+    browser = [l for l in links if l.startswith("https://")]
+    link = (browser or links or [None])[0]
+    if link is None:
+        return {"ok": False, "said": "svrngs made a link but printed none this helper can read"}
+    copier = shutil.which("wl-copy")
+    if copier is None:
+        return {"ok": False, "said": "wl-copy isn't installed, so the link couldn't be copied"}
+    subprocess.run([copier], input=link, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    return {"ok": True, "said": "Invite link copied. It works for a day, while this computer is on."}
 
 
 def main(argv):
@@ -287,27 +459,16 @@ def main(argv):
         if "--group" in rest:
             args += ["--group", rest[rest.index("--group") + 1]]
         return run_svrngs(args)
+    if verb == "models":
+        return models()
     if verb == "open":
         body = {}
         for flag, key in (("--lend", "lend"), ("--at", "at")):
             if flag in rest:
                 body[key] = rest[rest.index(flag) + 1]
-        root = data_dir()
-        try:
-            at = address(root)
-            if at is None:
-                return {"ok": False, "said": "svrngs has never started here"}
-            answer = ask(at, token(root), "POST", "/v1/open", body)
-        except Stopped:
-            return {"ok": False, "said": "svrngs is not running"}
-        except Unreadable as e:
-            return {"ok": False, "said": str(e)}
-        url = answer.get("open")
-        if not isinstance(url, str) or not re.fullmatch(r"http://[a-z0-9.-]+\.localhost:\d+/\S*", url):
-            return {"ok": False, "said": "svrngs answered no address to open"}
-        return {"ok": True, "open": url}
+        return open_in_browser(body)
     if verb == "link" and rest:
-        return run_svrngs(["link", rest[0]])
+        return invite(rest[0])
     return {"ok": False, "said": f"unknown verb or arguments: {text(' '.join(argv))}"}
 
 

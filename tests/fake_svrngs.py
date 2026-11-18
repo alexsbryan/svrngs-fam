@@ -28,6 +28,9 @@ class Fake:
     def __init__(self, mode="running"):
         self.mode = mode
         self.seen = []
+        # Lends' labels that answer as a model, and the model names they give.
+        self.models = {}
+        self.lends = LENDS
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -54,10 +57,31 @@ class Fake:
                     return self.answer(200, b"<html>a proxy's page</html>", "text/html")
                 if fake.mode == "huge":
                     return self.answer(200, {"groups": [], "pad": "x" * (300 * 1024)})
+                host = self.headers.get("Host", "")
+                if host.endswith(f".localhost:{fake.port}"):
+                    label = host.split(".")[0]
+                    if label in fake.models and self.path == "/v1/models":
+                        return self.answer(200, {"object": "list", "data": [{"id": m} for m in fake.models[label]]})
+                    return self.answer(404, b"Not Found", "text/plain")
                 if self.path == "/v1/groups":
                     return self.answer(200, GROUPS)
                 if self.path.startswith("/v1/lends?namespace="):
-                    return self.answer(200, LENDS)
+                    # The first group's lends; the second lends nothing.
+                    first = self.path.endswith("a" * 64)
+                    return self.answer(200, fake.lends if first else {"lent": [], "unanswered": []})
+                return self.answer(404, {"error": "no such route"})
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                fake.seen.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                if self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"):
+                    return self.answer(403, {"error": "this API answers programs on this computer, not pages"})
+                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                    return self.answer(401, {"error": "no token"})
+                if self.path == "/v1/open":
+                    asked = json.loads(body or b"{}")
+                    label = asked.get("lend") or "svrngs"
+                    return self.answer(200, {"open": f"http://{label}.localhost:{fake.port}/svrngs-open?code=one-time-secret"})
                 return self.answer(404, {"error": "no such route"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

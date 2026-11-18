@@ -34,6 +34,40 @@ Item {
   property bool _again: false
   property bool _againFull: false
 
+  // Friends' lends that answer as models, asked when the panel opens and
+  // again only when which lends there are changes.
+  property var models: []
+  property bool modelsAsked: false
+  property string _modelsKey: ""
+
+  // The action in flight ("" when none), and what the last one said.
+  property string doing: ""
+  property string said: ""
+  property bool saidOk: true
+
+  // The last command run for an action, for the logic test and `status`.
+  property var lastAsked: []
+
+  function act(key, args) {
+    if (doing !== "") return false
+    doing = key
+    said = ""
+    lastAsked = args
+    action.command = [root.helperPath].concat(args)
+    action.running = true
+    return true
+  }
+
+  function tell(words, ok) {
+    said = words
+    saidOk = ok
+  }
+
+  function askModels() {
+    if (modelsReader.running) return
+    modelsReader.running = true
+  }
+
   function refresh(full) {
     if (helper.running) {
       _again = true
@@ -47,7 +81,14 @@ Item {
   function apply(raw) {
     reads += 1
     answer = Model.parse(raw)
+    var key = Model.lendsKey(answer)
+    if (wanted && answer.lends && key !== _modelsKey) {
+      _modelsKey = key
+      askModels()
+    }
   }
+
+  onWantedChanged: if (!wanted) { _modelsKey = ""; said = "" }
 
   FolderListModel {
     id: lendFiles
@@ -100,6 +141,37 @@ Item {
         root._againFull = false
         root.refresh(full)
       }
+    }
+  }
+
+  Process {
+    id: action
+    command: ["true"]
+    stdout: StdioCollector {
+      id: actionOut
+      waitForEnd: true
+    }
+    onExited: function(code) {
+      var reply
+      try { reply = JSON.parse(String(actionOut.text)) } catch (e) { reply = { ok: false, said: "The helper exited " + code + " without an answer" } }
+      root.tell(String(reply.said || (reply.ok ? "Done" : "That didn't work")), reply.ok === true)
+      root.doing = ""
+      root.refresh(root.wanted)
+    }
+  }
+
+  Process {
+    id: modelsReader
+    command: [root.helperPath, "models"]
+    stdout: StdioCollector {
+      id: modelsOut
+      waitForEnd: true
+    }
+    onExited: {
+      var reply
+      try { reply = JSON.parse(String(modelsOut.text)) } catch (e) { reply = null }
+      root.models = reply && reply.ok && Array.isArray(reply.models) ? reply.models : []
+      root.modelsAsked = true
     }
   }
 

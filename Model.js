@@ -47,3 +47,72 @@ function badge(answer, lentHere) {
 function words(answer) {
   return "state." + stateOf(answer)
 }
+
+// ---- The panel's lists, from one answer ----------------------------------
+
+function running(answer) {
+  return stateOf(answer) === "running"
+}
+
+// Groups this person is still in.
+function groups(answer) {
+  if (!running(answer)) return []
+  return (answer.groups || []).filter(function(g) { return !g.left })
+}
+
+// What this computer lends, by name, with the groups' names it goes to.
+function lent(answer) {
+  if (!running(answer)) return []
+  var names = {}
+  groups(answer).forEach(function(g) { names[g.id] = g.name })
+  return (answer.mine || []).map(function(m) {
+    return {
+      name: m.name,
+      port: m.port,
+      groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" })
+    }
+  })
+}
+
+// What runs here and could be lent. The helper already leaves out what is
+// lent, svrngs itself, browsers' debug ports and the rest of its deny list.
+function offers(answer) {
+  if (!running(answer) || !answer.listeners) return []
+  return answer.listeners.map(function(l) { return { port: l.port, program: l.program, name: l.name || l.program } })
+}
+
+// Each group's lends from other people, for Open.
+function friendsLends(answer, group) {
+  var lends = running(answer) && answer.lends ? answer.lends[group.id] : null
+  if (!lends || !lends.lent) return []
+  return lends.lent.filter(function(l) { return l.person !== group.person }).map(function(l) {
+    return { person: l.person, name: l.name, label: labelOf(l.origin) }
+  })
+}
+
+// The label `svrngs open` takes for a lend: its address's first name.
+function labelOf(origin) {
+  var match = /^http:\/\/([a-z0-9]+)\.localhost:\d+\/$/.exec(String(origin || ""))
+  return match ? match[1] : ""
+}
+
+// The helper's argv to lend `offer` to `group` as `name`. The program is
+// always said: svrngs refuses a port it does not know without it (S0 (c)).
+function shareArgs(offer, groupId, name) {
+  return ["share", String(offer.port), groupId, name, "--program", offer.program]
+}
+
+// A name svrngs takes for a lend, as the helper makes them.
+function cleanName(wanted) {
+  return String(wanted || "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "")
+}
+
+// Which friends' lends are models changes only when the lends do; the
+// panel asks again only then.
+function lendsKey(answer) {
+  if (!running(answer) || !answer.lends) return ""
+  var labels = []
+  for (var id in answer.lends)
+    (answer.lends[id].lent || []).forEach(function(l) { labels.push(labelOf(l.origin)) })
+  return labels.sort().join(",")
+}
