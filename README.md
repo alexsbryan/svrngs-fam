@@ -47,12 +47,17 @@ from this repository's [latest release](https://github.com/alexsbryan/svrngs-fam
 then start them as yourself:
 
 ```
-sudo pacman -U \
-  https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0/svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst \
-  https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0/svrngs-fam-0.2.0-1-any.pkg.tar.zst
+mkdir -p ~/Downloads/svrngs && cd ~/Downloads/svrngs
+U=https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0
+curl -fLO $U/SHA256SUMS -fLO $U/svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst -fLO $U/svrngs-fam-0.2.0-1-any.pkg.tar.zst
+sha256sum -c SHA256SUMS
+sudo pacman -U svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst svrngs-fam-0.2.0-1-any.pkg.tar.zst
 /usr/share/svrngs/setup-user            # starts svrngs
 /usr/share/svrngs-fam/setup-user        # puts the icon in your bar
 ```
+
+The packages aren't signed, so pacman installs them from files you've
+downloaded and checked, not straight from a link.
 
 If you already run svrngs from its install line, `setup-user` moves that
 copy aside (it doesn't delete it) and your groups carry on as they were.
