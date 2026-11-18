@@ -43,8 +43,6 @@ ShellRoot {
       ], unanswered: ["Bo"] } },
       listeners: [{ port: 3000, program: "puma", name: "garden", pid: 1 }]
     })
-    readonly property string group: "󰡉"
-    readonly property string outline: "󰭘"
 
     function show(answer) {
       fam.apply(typeof answer === "string" ? answer : JSON.stringify(answer))
@@ -70,7 +68,7 @@ ShellRoot {
       console.log("the read at start, by the real helper")
       check("one read", fam.reads, 1)
       check("no svrngs here: not-installed", fam.state, "not-installed")
-      check("its glyph is the outline", barPanel.glyph, outline)
+      check("the mark is crossed out", fam.look.crossed, true)
       check("dimmed", same(barPanel.barIconColor, dim), true)
       check("both lends counted from their files", fam.lentHere, 2)
       check("no count while svrngs is not there to serve them", fam.badge, "")
@@ -78,18 +76,20 @@ ShellRoot {
       console.log("running")
       show({ svrngs: "running", groups: [] })
       check("lit", same(barPanel.barIconColor, lit), true)
-      check("the group glyph", barPanel.glyph, group)
+      check("the mark is not crossed out", fam.look.crossed, false)
       check("no warning", fam.look.warning, false)
       check("the count of lends beside it", fam.badge, "2")
       check("the tooltip says both", barPanel.tooltip, "svrngs is running · You lend 2 things from here")
+      check("the mark's record ring is gold", same(barPanel.iconRecord, barPanel.gold), true)
 
       console.log("stopped")
       show({ svrngs: "stopped" })
       check("dimmed", same(barPanel.barIconColor, dim), true)
-      check("the group glyph", barPanel.glyph, group)
+      check("the mark is not crossed out", fam.look.crossed, false)
       check("no count", fam.badge, "")
       check("no warning", fam.look.warning, false)
       check("the tooltip", barPanel.tooltip, "svrngs isn't running")
+      check("the gold dims with it", same(barPanel.iconRecord, Qt.darker(barPanel.gold, 1.6)), true)
 
       console.log("never started")
       show({ svrngs: "never-started" })
@@ -99,6 +99,7 @@ ShellRoot {
       console.log("an answer that could not be read is not stopped")
       show({ svrngs: "unreadable", reason: "/v1/groups answered 500: the record could not be read" })
       check("a warning", fam.look.warning, true)
+      check("the mark takes the bar's warning colour", same(barPanel.iconInk, barPanel.urgentColor), true)
       check("not lit", same(barPanel.barIconColor, dim), true)
       check("no count", fam.badge, "")
       check("the tooltip says so", barPanel.tooltip, "svrngs's answer couldn't be read")

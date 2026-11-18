@@ -16,7 +16,7 @@ package() {
   local src="$srcdir/$pkgname-$pkgver"
   local dest="$pkgdir/usr/share/svrngs-fam"
   install -Dm644 "$src/manifest.json" "$dest/manifest.json"
-  install -Dm644 -t "$dest" "$src/Panel.qml" "$src/Service.qml" "$src/Model.js"
+  install -Dm644 -t "$dest" "$src/Panel.qml" "$src/Service.qml" "$src/Model.js" "$src/SvrngsMark.qml"
   install -Dm644 -t "$dest/i18n" "$src"/i18n/*.json
   install -Dm755 "$src/bin/svrngs-fam" "$dest/bin/svrngs-fam"
   install -Dm755 "$src/setup-user" "$dest/setup-user"

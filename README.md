@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/lockup-dark.svg">
+  <img alt="svrngs, sovereign rings" src="brand/lockup-light.svg" width="280">
+</picture>
+
 # svrngs.fam
 
 Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.

@@ -28,9 +28,13 @@ Panel {
   readonly property color foreground: bar ? bar.barForeground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property color barIconColor: fam.look.lit ? foreground : dim
-  // nf-md-account_group, and its outline when svrngs is not on this
-  // computer at all.
-  readonly property string glyph: fam.look.crossed ? "󰭘" : "󰡉"
+  // svrngs's mark in the bar (svrngs docs/brand): the bar's ink, its record
+  // ring gold, both dimmed while svrngs isn't running; the bar's warning
+  // colour when its answer couldn't be read; a slash when it isn't here.
+  readonly property color gold: "#e0b040"
+  readonly property color urgentColor: bar ? bar.urgent : Commons.Color.urgent
+  readonly property color iconInk: fam.look.warning ? urgentColor : barIconColor
+  readonly property color iconRecord: fam.look.lit ? gold : Qt.darker(gold, 1.6)
 
   readonly property string stateWords: strings.t(Model.words(fam.answer))
   readonly property string lentWords: fam.badge === "" ? "" : strings.tn("lent.count", fam.lentHere).arg(fam.lentHere)
@@ -229,9 +233,16 @@ Panel {
     bar: root.bar
     // Lit only while svrngs answers; an answer that could not be read takes
     // the bar's urgent colour, never the stopped look.
-    text: root.glyph
     foreground: root.barIconColor
-    active: fam.look.warning
+    iconComponent: Component {
+      SvrngsMark {
+        size: Style.bar.iconCanvas
+        ink: root.iconInk
+        record: root.iconRecord
+        people: root.iconInk
+        crossed: fam.look.crossed
+      }
+    }
     labelText: fam.badge
     tooltipText: root.tooltip
     onPressed: function(buttonCode) {
@@ -382,6 +393,9 @@ Panel {
           PanelHero {
             width: parent.width
             title: "svrngs"
+            iconComponent: Component {
+              SvrngsMark { cut: "medium"; size: Style.font.display; ink: root.foreground; record: root.gold; people: "#f08070" }
+            }
             meta: root.tooltip
             detail: fam.answer && fam.answer.reason ? fam.answer.reason : ""
             foreground: root.foreground

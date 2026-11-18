@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-preview-") as directory:
     harness = scratch / "harness"
     harness.mkdir()
     shutil.copy(ROOT / "tests/preview/shell.qml", harness / "shell.qml")
-    for name in ("Service.qml", "Model.js"):
+    for name in ("Service.qml", "Model.js", "SvrngsMark.qml"):
         shutil.copy(ROOT / name, harness / name)
     shutil.copytree(ROOT / "i18n", harness / "i18n")
     shutil.copy(ROOT / "Panel.qml", harness / "BarPanel.qml")
