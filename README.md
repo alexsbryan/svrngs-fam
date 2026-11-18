@@ -29,9 +29,12 @@ Release; svrn-docs `rings/current/SVRNGS_PACKAGE.md`) and `svrngs-fam` (this
 plugin, which needs it).
 
     packaging/arch/bump 1.11.0             # svrngs-bin to a release, by its SHA256SUMS
+    # Build outside this folder: it is the plugin, and Omarchy refuses a
+    # plugin folder holding makepkg's links.
+    export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svrngs-build/src
     (cd packaging/arch/svrngs-bin && makepkg -f)
     (cd packaging/arch/svrngs-fam && makepkg -f)
-    sudo pacman -U packaging/arch/*/*.pkg.tar.zst
+    sudo pacman -U /tmp/svrngs-build/out/*.pkg.tar.zst
     /usr/share/svrngs/setup-user           # as yourself: the packaged svrngs runs, an
                                            # install-line one moved aside; ~/.svrngs kept
     /usr/share/svrngs-fam/setup-user       # as yourself: the icon in the bar
