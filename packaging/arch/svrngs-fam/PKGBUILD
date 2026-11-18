@@ -1,7 +1,7 @@
 # svrngs.fam, the Omarchy bar plugin for svrngs, packaged from this
 # repository's checkout: `makepkg` here builds the commit checked out.
 pkgname=svrngs-fam
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="svrngs in the Omarchy bar: lend what you're building, use your people's models, invite"
 arch=('any')
