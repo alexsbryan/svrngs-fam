@@ -26,11 +26,6 @@ plugin downloads svrngs's installer, checks it against the svrngs release
 key, and installs svrngs for you alone, with no password. Your browser then
 opens your home page, where you start a group or join your friend's.
 
-Get svrngs needs a svrngs release that carries its signed installer, which
-starts with the next one. Until then, install svrngs with the line in
-[its README](https://github.com/alexsbryan/svrngs#start-a-group), and the
-icon lights up once it's running.
-
 The plugin uses python, ss, wl-copy and gpg, which Omarchy already has.
 
 ### Or as packages
