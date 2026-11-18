@@ -10,6 +10,13 @@ import "Model.js" as Model
 // this computer lends, the models your people lend, and your groups.
 // Every string from svrngs or a friend is drawn as plain text, and nothing
 // is lent without a second press.
+//
+// Laid out for someone in many groups (the study "svrngs panel at scale",
+// after svrngs V1.9's home page): a group is one line until it is opened,
+// one open at a time; inside it, what each person lends is a row of names,
+// each name the way in, and what the group's folder carries is one row.
+// What the rows share is said once. Typing finds a thing, a model or a
+// person in every group.
 Panel {
   id: root
   moduleName: "svrngs.fam"
@@ -35,6 +42,19 @@ Panel {
   readonly property var lent: Model.lent(fam.answer)
   readonly property var offers: Model.offers(fam.answer)
 
+  // What is typed to find a thing; while there is any, every group with a
+  // match is open, showing only its matches.
+  property string query: ""
+  readonly property bool finding: query.trim() !== ""
+  // The one group open, by id; a person in one group has it open.
+  property string openGroup: ""
+  readonly property var views: {
+    var out = {}
+    groups.forEach(function(g) { out[g.id] = Model.groupView(fam.answer, g, root.query) })
+    return out
+  }
+  readonly property var shownModels: fam.models.filter(function(m) { return Model.modelShown(m, root.query) })
+
   // The lend waiting for its second press: { port, program, name }, or null.
   property var lending: null
   property string lendName: ""
@@ -48,14 +68,22 @@ Panel {
   readonly property var stops: {
     var out = []
     if (!isRunning) return fam.state === "stopped" ? ["start"] : []
-    lent.forEach(function(l) { out.push("stop:" + l.name) })
-    offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
-    if (lending) out.push("lend:confirm", "lend:cancel")
-    fam.models.forEach(function(m, i) { out.push("copy:" + i) })
+    if (!finding) {
+      lent.forEach(function(l) { out.push("stop:" + l.name) })
+      offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
+      if (lending) out = out.concat(groups.length > 1 ? ["lend:group"] : [], ["lend:confirm", "lend:cancel"])
+    }
+    shownModels.forEach(function(m) { out.push("copy:" + m.label) })
     groups.forEach(function(g) {
+      var view = views[g.id]
+      if (!view || !view.shown) return
+      out.push("group:" + g.id)
+      if (!expanded(g.id)) return
+      view.people.forEach(function(p) { p.items.forEach(function(i) { if (i.answering && i.label !== "") out.push("open:" + i.label) }) })
+      view.carried.forEach(function(i) { if (i.label !== "") out.push("open:" + i.label) })
+      if (finding) return
       out.push("invite:" + g.id, "home:" + g.id)
       if (inviting === g.id) out.push("invite:confirm", "invite:cancel")
-      Model.friendsLends(fam.answer, g).forEach(function(l) { if (l.label !== "" && l.answering) out.push("open:" + l.label) })
     })
     return out
   }
@@ -73,7 +101,17 @@ Panel {
     wanted: root.opened
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; cursorActive = false; cursor = 0 }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; cursorActive = false; cursor = 0; query = "" }
+  onQueryChanged: cursor = 0
+
+  function expanded(id) {
+    return finding || openGroup === id || groups.length === 1
+  }
+
+  function toggleGroup(id) {
+    inviting = ""
+    openGroup = openGroup === id ? "" : id
+  }
 
   function moveCursor(dx, dy) {
     if (!cursorActive) { cursorActive = true; cursor = 0; return }
@@ -93,11 +131,13 @@ Panel {
     else if (kind === "stop") root.stop(rest)
     else if (stop === "lend:confirm") lend()
     else if (stop === "lend:cancel") lending = null
+    else if (stop === "lend:group") nextLendGroup()
     else if (kind === "lend") {
       var offer = offers.filter(function(o) { return String(o.port) === rest })[0]
       if (offer) { askLend(offer); cursorTo("lend:confirm") }
     }
-    else if (kind === "copy") copyAddress(fam.models[Number(rest)])
+    else if (kind === "copy") copyAddress(fam.models.filter(function(m) { return m.label === rest })[0])
+    else if (kind === "group") { toggleGroup(rest); cursorTo(stop) }
     else if (stop === "invite:confirm") invite(inviting)
     else if (stop === "invite:cancel") inviting = ""
     else if (kind === "invite") { lending = null; inviting = rest; cursorTo("invite:confirm") }
@@ -118,6 +158,11 @@ Panel {
     lendGroup = groups.length > 0 ? groups[0].id : ""
   }
 
+  function nextLendGroup() {
+    var at = groups.map(function(g) { return g.id }).indexOf(lendGroup)
+    if (groups.length > 0) lendGroup = groups[(at + 1) % groups.length].id
+  }
+
   function lend() {
     var name = Model.cleanName(lendName)
     if (!lending || name === "" || lendGroup === "") return
@@ -133,12 +178,20 @@ Panel {
   }
 
   function copyAddress(model) {
+    if (!model) return
     Quickshell.execDetached(["wl-copy", "--", model.address])
     fam.tell(strings.t("models.copied"), true)
   }
 
   function startSvrngs() {
     Quickshell.execDetached(["systemctl", "--user", "start", "svrngs"])
+  }
+
+  function summary(view) {
+    return Model.groupSummary(view, {
+      one: strings.t("groups.thing"), many: strings.t("groups.things"),
+      quiet: strings.t("groups.quiet"), unread: strings.t("groups.unread")
+    })
   }
 
   ShellIpc {
@@ -149,7 +202,7 @@ Panel {
     function refresh(): string { fam.refresh(root.opened); return "ok" }
     function status(): string {
       return JSON.stringify({ state: fam.state, reads: fam.reads, lentHere: fam.lentHere, badge: fam.badge, opened: root.opened,
-                              offers: root.offers.length, models: fam.models.length, said: fam.said })
+                              offers: root.offers.length, models: fam.models.length, said: fam.said, stop: root.currentStop })
     }
   }
 
@@ -225,6 +278,50 @@ Panel {
     foreground: root.foreground
   }
 
+  // A thing's name, which is its way in: dimmed, and pressed to no end,
+  // while its program is not running.
+  component Cell: Button {
+    property var item: ({})
+    readonly property string stop: "open:" + item.label
+    hasCursor: root.currentStop === stop
+    enabled: fam.doing === "" && item.answering === true && item.label !== ""
+    text: fam.doing === stop ? strings.t("working") : item.name
+    foreground: item.answering === false ? root.dim : root.foreground
+    horizontalPadding: Style.space(4)
+    verticalPadding: Style.space(1)
+    tooltipText: item.answering === false ? strings.t("groups.notRunning") : ""
+    onClicked: root.openLend(item.label)
+  }
+
+  // A row of cells under a name: a person's lends, or the group's own apps.
+  component Shelf: Item {
+    id: shelf
+    property string who: ""
+    property var items: []
+    width: parent ? parent.width : 0
+    implicitHeight: Math.max(whoText.implicitHeight, cells.implicitHeight)
+    Note {
+      id: whoText
+      width: Style.space(80)
+      text: shelf.who
+      elide: Text.ElideRight
+      wrapMode: Text.NoWrap
+      anchors.top: parent.top
+      anchors.topMargin: Style.space(3)
+    }
+    Flow {
+      id: cells
+      anchors.left: whoText.right
+      anchors.right: parent.right
+      anchors.leftMargin: Style.space(6)
+      spacing: Style.space(2)
+      Repeater {
+        model: shelf.items
+        Cell { required property var modelData; item: modelData }
+      }
+    }
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: button
@@ -242,6 +339,13 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
       onActivateRequested: if (root.currentStop !== "") root.activate(root.currentStop)
+      // Typing anywhere in the panel is typed into the search.
+      onTextKey: function(t) {
+        if (!root.isRunning || t === "" || t.trim() === "" && root.query === "") return
+        find.text = find.text + t
+        root.query = find.text
+        find.forceActiveFocus()
+      }
 
       Flickable {
         id: flick
@@ -286,9 +390,31 @@ Panel {
             }
           }
 
+          TextField {
+            id: find
+            visible: root.isRunning
+            width: parent.width
+            foreground: root.foreground
+            placeholderText: strings.t("find.placeholder")
+            onTextChanged: root.query = text
+            onAccepted: { root.cursorActive = true; root.cursor = 0; keyCatcher.forceActiveFocus() }
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Down) {
+                root.cursorActive = true
+                root.cursor = 0
+                keyCatcher.forceActiveFocus()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                if (text !== "") text = ""
+                else keyCatcher.forceActiveFocus()
+                event.accepted = true
+              }
+            }
+          }
+
           // ---- On this computer ----------------------------------------
           Column {
-            visible: root.isRunning
+            visible: root.isRunning && !root.finding
             width: parent.width
             spacing: Style.space(8)
 
@@ -346,21 +472,15 @@ Panel {
                   onAccepted: root.lend()
                 }
               }
-              Flow {
+              Dropdown {
                 visible: root.groups.length > 1
                 width: parent.width
-                spacing: Style.space(6)
-                Repeater {
-                  model: root.groups
-                  Button {
-                    required property var modelData
-                    bordered: true
-                    selected: root.lendGroup === modelData.id
-                    text: modelData.name
-                    foreground: root.foreground
-                    onClicked: root.lendGroup = modelData.id
-                  }
-                }
+                label: strings.t("lend.group")
+                options: root.groups.map(function(g) { return { value: g.id, label: g.name } })
+                value: root.lendGroup
+                hasCursor: root.currentStop === "lend:group"
+                foreground: root.foreground
+                onChanged: function(v) { root.lendGroup = v }
               }
               Note { text: strings.t("lend.meaning").arg(root.groupName(root.lendGroup)) }
               Row {
@@ -382,28 +502,26 @@ Panel {
             }
           }
 
-          PanelSeparator { visible: root.isRunning; foreground: root.foreground }
+          PanelSeparator { visible: root.isRunning && !root.finding; foreground: root.foreground }
 
           // ---- Models your people lend ---------------------------------
           Column {
-            visible: root.isRunning
+            visible: root.isRunning && (!root.finding || root.shownModels.length > 0)
             width: parent.width
             spacing: Style.space(8)
 
             PanelSectionHeader { text: strings.t("models.title"); foreground: root.foreground }
 
             Repeater {
-              model: fam.models
+              model: root.shownModels
               Line {
-                id: modelLine
                 required property var modelData
-                required property int index
                 words: strings.t("models.row").arg(modelData.name).arg(modelData.person)
                 // The model's own names, when they say more than the lend's.
                 note: modelData.models.join(", ") === modelData.name ? "" : modelData.models.join(", ")
                 Act {
                   words: strings.t("action.copyAddress")
-                  stop: "copy:" + modelLine.index
+                  stop: "copy:" + modelData.label
                   onClicked: root.copyAddress(modelData)
                 }
               }
@@ -416,13 +534,13 @@ Panel {
             }
           }
 
-          PanelSeparator { visible: root.isRunning; foreground: root.foreground }
+          PanelSeparator { visible: root.isRunning && (!root.finding || root.shownModels.length > 0); foreground: root.foreground }
 
           // ---- Your groups ---------------------------------------------
           Column {
             visible: root.isRunning
             width: parent.width
-            spacing: Style.space(8)
+            spacing: Style.space(4)
 
             PanelSectionHeader { text: strings.t("groups.title"); foreground: root.foreground }
 
@@ -431,62 +549,98 @@ Panel {
               Column {
                 id: groupColumn
                 required property var modelData
+                readonly property var view: root.views[modelData.id] || { people: [], carried: [], unanswered: [], shown: false, count: 0, read: false }
+                readonly property bool open: root.expanded(modelData.id)
+                visible: view.shown
                 width: parent.width
-                spacing: Style.space(6)
+                spacing: Style.space(4)
 
-                Line {
-                  words: strings.t("groups.row").arg(groupColumn.modelData.name).arg(groupColumn.modelData.person)
-                  Act {
-                    doing: "invite:" + groupColumn.modelData.id
-                    words: strings.t("action.invite")
-                    stop: doing
-                    onClicked: { root.lending = null; root.inviting = groupColumn.modelData.id }
-                  }
-                  Act {
-                    doing: "open:"
-                    stop: "home:" + groupColumn.modelData.id
-                    words: strings.t("action.open")
-                    onClicked: root.openLend("")
-                  }
+                // The group, closed to one line: its name, what it shares,
+                // who did not answer. Pressed, it opens; the rest close.
+                Button {
+                  width: parent.width
+                  leftAlign: true
+                  hasCursor: root.currentStop === "group:" + groupColumn.modelData.id
+                  selected: groupColumn.open && !root.finding
+                  foreground: root.foreground
+                  text: (groupColumn.open ? "▾ " : "▸ ") + groupColumn.modelData.name + "   " + root.summary(groupColumn.view)
+                  onClicked: root.toggleGroup(groupColumn.modelData.id)
                 }
 
                 Column {
-                  visible: root.inviting === groupColumn.modelData.id
-                  width: parent.width
-                  spacing: Style.space(6)
-                  Note { text: strings.t("invite.question").arg(groupColumn.modelData.name) }
-                  Row {
-                    spacing: Style.space(8)
-                    Act { words: strings.t("action.makeLink"); stop: "invite:confirm"; onClicked: root.invite(groupColumn.modelData.id) }
-                    Act { words: strings.t("action.cancel"); stop: "invite:cancel"; onClicked: root.inviting = "" }
-                  }
-                }
+                  visible: groupColumn.open
+                  width: parent.width - Style.space(14)
+                  x: Style.space(14)
+                  spacing: Style.space(4)
 
-                Repeater {
-                  model: Model.unanswered(fam.answer, groupColumn.modelData)
                   Note {
-                    required property var modelData
-                    text: strings.t("groups.unanswered").arg(modelData)
+                    visible: !root.finding && groupColumn.view.count > 0
+                    text: strings.t("groups.shared").arg(groupColumn.modelData.person)
                   }
-                }
 
-                Repeater {
-                  model: Model.friendsLends(fam.answer, groupColumn.modelData)
-                  Line {
-                    required property var modelData
-                    words: strings.t("groups.friendLend").arg(modelData.person).arg(modelData.name)
-                    note: modelData.answering ? "" : strings.t("groups.notRunning")
+                  Repeater {
+                    model: groupColumn.view.people
+                    Shelf {
+                      required property var modelData
+                      who: modelData.person
+                      items: modelData.items
+                    }
+                  }
+
+                  Shelf {
+                    visible: groupColumn.view.carried.length > 0
+                    who: strings.t("groups.carried")
+                    items: groupColumn.view.carried
+                  }
+
+                  Repeater {
+                    model: groupColumn.view.unanswered
+                    Note {
+                      required property var modelData
+                      text: strings.t("groups.unanswered").arg(modelData)
+                    }
+                  }
+
+                  Note {
+                    visible: groupColumn.view.read && groupColumn.view.count === 0 && groupColumn.view.unanswered.length === 0
+                    text: strings.t("groups.empty")
+                  }
+
+                  Row {
+                    visible: !root.finding
+                    spacing: Style.space(8)
                     Act {
-                      visible: modelData.label !== ""
-                      enabled: fam.doing === "" && modelData.answering
-                      doing: "open:" + modelData.label
+                      doing: "invite:" + groupColumn.modelData.id
+                      words: strings.t("action.invite")
                       stop: doing
-                      words: strings.t("action.open")
-                      onClicked: root.openLend(modelData.label)
+                      onClicked: { root.lending = null; root.inviting = groupColumn.modelData.id }
+                    }
+                    Act {
+                      doing: "open:"
+                      stop: "home:" + groupColumn.modelData.id
+                      words: strings.t("action.home")
+                      onClicked: root.openLend("")
+                    }
+                  }
+
+                  Column {
+                    visible: root.inviting === groupColumn.modelData.id
+                    width: parent.width
+                    spacing: Style.space(6)
+                    Note { text: strings.t("invite.question").arg(groupColumn.modelData.name) }
+                    Row {
+                      spacing: Style.space(8)
+                      Act { words: strings.t("action.makeLink"); stop: "invite:confirm"; onClicked: root.invite(groupColumn.modelData.id) }
+                      Act { words: strings.t("action.cancel"); stop: "invite:cancel"; onClicked: root.inviting = "" }
                     }
                   }
                 }
               }
+            }
+
+            Note {
+              visible: root.finding && root.groups.every(function(g) { return !(root.views[g.id] || {}).shown }) && root.shownModels.length === 0
+              text: strings.t("find.none").arg(root.query.trim())
             }
           }
         }

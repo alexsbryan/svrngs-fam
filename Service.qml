@@ -11,6 +11,13 @@ import "Model.js" as Model
 // one read at start; the `api` file, which svrngs writes each time it starts
 // (svrngs api.rs:139-145), so a start is a file event; and `lends/`, which
 // `svrngs share` and `unshare` write, counted with no process at all.
+//
+// How much a read asks: SHORT is svrngs's groups alone; HERE adds what
+// listens on this computer, no network; FULL adds what every group lends,
+// which asks each of its people's computers. FULL runs as the panel opens
+// and after an action of its own, as the home page reads on opening, never
+// on a timer; HERE every 5 s while it is open (svrn-docs OMARCHY_PLUGIN.md;
+// the study, "svrngs panel at scale").
 Item {
   id: root
 
@@ -20,8 +27,11 @@ Item {
   // The harness points this at a stand-in, so a test reaches no real svrngs.
   property string helperPath: pluginDir + "/bin/svrngs-fam"
 
-  // True while the panel is open: then, and only then, svrngs is surveyed
-  // every 5 s, with what each group lends and what listens here.
+  readonly property int short: 0
+  readonly property int here: 1
+  readonly property int full: 2
+
+  // True while the panel is open: read FULL as it opens, then HERE every 5 s.
   property bool wanted: false
 
   property var answer: null
@@ -34,15 +44,18 @@ Item {
   readonly property string badge: Model.badge(answer, lentHere)
 
   property bool _again: false
-  property bool _againFull: false
+  property int _againDepth: 0
 
   // Friends' lends that answer as models, asked when the panel opens and
-  // again only when which lends there are changes.
+  // again only when which lends there are changes. What each lend answered
+  // is kept while the shell runs (label: its models, [] for none), so a
+  // lend is asked once, not at every open; one not reached is not kept.
   property var models: []
   property bool modelsAsked: false
-  // How many friends' lends were asked, answering or not.
+  // How many friends' lends could be models, asked or known.
   property int lendsAsked: 0
   property string _modelsKey: ""
+  property var _known: ({})
 
   // The action in flight ("" when none), and what the last one said.
   property string doing: ""
@@ -69,22 +82,42 @@ Item {
 
   function askModels() {
     if (modelsReader.running) return
+    var known = Object.keys(_known)
+    modelsReader.command = [root.helperPath, "models"].concat(known.length > 0 ? ["--skip", known.join(",")] : [])
     modelsReader.running = true
   }
 
-  function refresh(full) {
+  // What the models lookup said, beside what was known: the lends that are
+  // models now, each with its models.
+  function applyModels(reply) {
+    if (!reply || !reply.ok || !Array.isArray(reply.lends)) return
+    var known = Object.assign({}, _known)
+    reply.lends.forEach(function(l) { if (Array.isArray(l.models)) known[l.label] = l.models })
+    _known = known
+    models = reply.lends.filter(function(l) { return (known[l.label] || []).length > 0 })
+      .map(function(l) { return Object.assign({}, l, { models: known[l.label] }) })
+    lendsAsked = reply.lends.length
+    modelsAsked = true
+  }
+
+  function refresh(depth) {
+    var d = typeof depth === "boolean" ? (depth ? full : short) : depth
     if (helper.running) {
       _again = true
-      _againFull = _againFull || full
+      _againDepth = Math.max(_againDepth, d)
       return
     }
-    helper.command = [root.helperPath, "state"].concat(full ? ["--full"] : [])
+    helper.command = [root.helperPath, "state"].concat(d === full ? ["--full"] : d === here ? ["--here"] : [])
     helper.running = true
   }
 
   function apply(raw) {
     reads += 1
-    answer = Model.parse(raw)
+    var next = Model.parse(raw)
+    // A read that did not ask the groups keeps what the last one heard.
+    if (next.svrngs === "running" && !next.lends && answer && answer.svrngs === "running" && answer.lends)
+      next.lends = answer.lends
+    answer = next
     var key = Model.lendsKey(answer)
     if (wanted && answer.lends && key !== _modelsKey) {
       _modelsKey = key
@@ -92,7 +125,10 @@ Item {
     }
   }
 
-  onWantedChanged: if (!wanted) { _modelsKey = ""; said = "" }
+  onWantedChanged: {
+    if (wanted) refresh(full)
+    else { _modelsKey = ""; said = "" }
+  }
 
   FolderListModel {
     id: lendFiles
@@ -100,7 +136,7 @@ Item {
     nameFilters: ["*.json"]
     showDirs: false
     showHidden: false
-    onCountChanged: if (root.wanted) root.refresh(true)
+    onCountChanged: if (root.wanted) root.refresh(root.here)
   }
 
   // The api file appearing (svrngs's first start) is the data directory's
@@ -115,7 +151,7 @@ Item {
     property int seen: -1
     onStatusChanged: if (status === FolderListModel.Ready && seen < 0) seen = count
     onCountChanged: {
-      if (seen >= 0 && count > seen) root.refresh(root.wanted)
+      if (seen >= 0 && count > seen) root.refresh(root.wanted ? root.full : root.short)
       if (seen >= 0) seen = count
     }
   }
@@ -126,7 +162,7 @@ Item {
     printErrors: false
     onFileChanged: {
       reload()
-      root.refresh(root.wanted)
+      root.refresh(root.wanted ? root.full : root.short)
     }
   }
 
@@ -140,10 +176,10 @@ Item {
       var said = String(helperOut.text)
       root.apply(said.trim() === "" ? JSON.stringify({ svrngs: "unreadable", reason: "the helper exited " + code + " and said nothing" }) : said)
       if (root._again) {
-        var full = root._againFull
+        var depth = root._againDepth
         root._again = false
-        root._againFull = false
-        root.refresh(full)
+        root._againDepth = 0
+        root.refresh(depth)
       }
     }
   }
@@ -160,13 +196,13 @@ Item {
       try { reply = JSON.parse(String(actionOut.text)) } catch (e) { reply = { ok: false, said: "The helper exited " + code + " without an answer" } }
       root.tell(String(reply.said || (reply.ok ? "Done" : "That didn't work")), reply.ok === true)
       root.doing = ""
-      root.refresh(root.wanted)
+      root.refresh(root.wanted ? root.full : root.short)
     }
   }
 
   Process {
     id: modelsReader
-    command: [root.helperPath, "models"]
+    command: ["true"]
     stdout: StdioCollector {
       id: modelsOut
       waitForEnd: true
@@ -174,21 +210,19 @@ Item {
     onExited: {
       var reply
       try { reply = JSON.parse(String(modelsOut.text)) } catch (e) { reply = null }
-      root.models = reply && reply.ok && Array.isArray(reply.models) ? reply.models : []
-      root.lendsAsked = reply && reply.ok ? Number(reply.asked) || 0 : 0
+      root.applyModels(reply)
       root.modelsAsked = true
     }
   }
 
   // Polling is the last resort (Omarchy shell-dev.md): only while the panel
-  // is open, and never a new survey while one is running.
+  // is open, only what is on this computer, and never a read while one runs.
   Timer {
     interval: 5000
     repeat: true
     running: root.wanted
-    triggeredOnStart: true
-    onTriggered: root.refresh(true)
+    onTriggered: root.refresh(root.here)
   }
 
-  Component.onCompleted: refresh(false)
+  Component.onCompleted: refresh(short)
 }

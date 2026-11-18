@@ -6,6 +6,7 @@ and refuses any request carrying `Origin` or `Sec-Fetch-Site`, as svrngs does
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "fake-token-0123456789abcdef"
@@ -30,6 +31,10 @@ class Fake:
         self.seen = []
         # Lends' labels that answer as a model, and the model names they give.
         self.models = {}
+        # Lends' labels whose program does not answer: svrngs says 502.
+        self.down = set()
+        # Seconds each /v1/lends takes, as a lender slow to answer makes it.
+        self.delay = 0
         self.lends = LENDS
         fake = self
 
@@ -62,9 +67,13 @@ class Fake:
                     label = host.split(".")[0]
                     if label in fake.models and self.path == "/v1/models":
                         return self.answer(200, {"object": "list", "data": [{"id": m} for m in fake.models[label]]})
+                    if label in fake.down:
+                        return self.answer(502, {"error": "the lend's program did not answer"})
                     return self.answer(404, b"Not Found", "text/plain")
                 if self.path == "/v1/groups":
                     return self.answer(200, GROUPS)
+                if self.path.startswith("/v1/lends?namespace=") and fake.delay:
+                    time.sleep(fake.delay)
                 if self.path.startswith("/v1/lends?namespace="):
                     # The first group's lends; the second lends nothing.
                     first = self.path.endswith("a" * 64)

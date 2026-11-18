@@ -78,8 +78,10 @@ checks = re.findall(r"qml:\s+(ok|FAIL)\s+(.*?)\s*$", plain, re.MULTILINE)
 for line in re.findall(r"qml:\s+(.*)$", plain, re.MULTILINE):
     print(" ", line)
 failed = [name for state, name in checks if state == "FAIL"]
-errors = [l for l in plain.splitlines() if re.search(r"svrngs|BarPanel|Service\.qml|Model\.js", l) and re.search(r"WARN|ERROR|Error", l)]
+errors = [l for l in plain.splitlines() if re.search(r"svrngs|BarPanel|Service\.qml|Model\.js|shell\.qml", l) and re.search(r"WARN|ERROR|Error", l)]
 
+if failed or "ALL OK" not in plain:
+    print("\n".join(l for l in plain.splitlines() if re.search(r"WARN|ERROR|Error", l))[-3000:])
 assert checks, "the harness produced no checks:\n" + plain[-3000:]
 assert not failed, "failed: " + "; ".join(failed)
 assert not errors, "QML warnings from the plugin:\n" + "\n".join(errors)

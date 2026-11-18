@@ -248,6 +248,40 @@ full = state(home, "--full")["lends"]["a" * 64]["lent"]
 check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, False])
 fake.close()
 
+home = case("groups asked together, a quick read, the group's own apps")
+fake = Fake()
+data_dir(home, port=fake.port)
+fake.delay = 1.0
+began = time.monotonic()
+got = state(home, "--full")
+took = time.monotonic() - began
+check("two groups each a second slow take about one second, not two", took < 1.8, True)
+check("both answered", sorted(got["lends"]), ["a" * 64, "b" * 64])
+fake.delay = 0
+quick = state(home, "--here")
+check("the quick read says what listens here", "listeners" in quick, True)
+check("and asks no group", "lends" in quick, False)
+fake.lends = {"lent": [{"person": "Fedora", "name": "Money", "kind": "money", "origin": f"http://m1.localhost:{fake.port}/", "group": "a" * 64}]}
+check("an app the group's folder carries is marked so", state(home, "--full")["lends"]["a" * 64]["lent"][0]["carried"], True)
+fake.close()
+
+home = case("models: what is known is not asked; not reached is not known")
+fake = Fake()
+data_dir(home, port=fake.port)
+fake.lends = {"lent": [
+    {"person": "Fedora", "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
+    {"person": "Fedora", "name": "flash", "kind": "spot", "origin": f"http://down1.localhost:{fake.port}/"},
+    {"person": "Fedora", "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
+]}
+fake.models = {"model1": ["qwen3-coder"]}
+fake.down = {"down1"}
+got, _ = run(home, "models", "--skip", "model1")
+said = {l["name"]: l["models"] for l in got["lends"]}
+check("a lend named in --skip is listed, not asked", (said["coder"], any(s["headers"].get("Host", "").startswith("model1.") for s in fake.seen)), (None, False))
+check("one not reached (502) is not known", said["flash"], None)
+check("one that answered with no models is known as none", said["garden"], [])
+fake.close()
+
 home = case("open: in the browser, signed in")
 fake = Fake()
 data_dir(home, port=fake.port)

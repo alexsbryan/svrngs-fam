@@ -205,8 +205,8 @@ ShellRoot {
       barPanel.lending = null
       barPanel.inviting = ""
       fam.models = [{ person: "Fedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
-      check("a stop for every button, in the order drawn, none for a lend that is not running", JSON.stringify(barPanel.stops), JSON.stringify(
-        ["stop:notes", "lend:3000", "copy:0", "invite:g1", "home:g1", "open:abc123", "invite:g2", "home:g2"]))
+      check("groups start closed: a stop each", JSON.stringify(barPanel.stops), JSON.stringify(
+        ["stop:notes", "lend:3000", "copy:abc123", "group:g1", "group:g2"]))
       check("no cursor until a key moves it", barPanel.currentStop, "")
       barPanel.moveCursor(0, 1)
       check("the first key puts it on the first button", barPanel.currentStop, "stop:notes")
@@ -225,7 +225,63 @@ ShellRoot {
       check("Cancel by keyboard lends nothing", [barPanel.lending, fam.doing].join("|"), "|")
       barPanel.moveCursor(0, -99)
       barPanel.moveCursor(0, 99)
-      check("the cursor stays within the buttons", barPanel.currentStop, "home:g2")
+      check("the cursor stays within the buttons", barPanel.currentStop, "group:g2")
+      scale()
+    }
+
+    // ---- At scale: groups that open, a search, and what is kept ----------------
+    function scale() {
+      console.log("groups open one at a time")
+      barPanel.cursorActive = false
+      barPanel.activate("group:g1")
+      check("Enter on a group opens it", barPanel.openGroup, "g1")
+      check("its running lends are stops, a stopped one is not, then Invite and Home page",
+            JSON.stringify(barPanel.stops.slice(3)), JSON.stringify(["group:g1", "open:abc123", "invite:g1", "home:g1", "group:g2"]))
+      var view = barPanel.views["g1"]
+      check("its people's lends by person", JSON.stringify(view.people.map(function(p) { return p.person + ":" + p.items.map(function(i) { return i.name }).join("+") })),
+            JSON.stringify(["Fedora:deepseek-flash+garden"]))
+      check("its line says what it shares and who did not answer", barPanel.summary(view), "2 things shared · 1 not answering")
+      check("a group never read says so", barPanel.summary(barPanel.views["g2"]), "couldn't ask this group")
+      barPanel.toggleGroup("g2")
+      check("opening another closes the first", [barPanel.expanded("g1"), barPanel.expanded("g2")].join(","), "false,true")
+      barPanel.toggleGroup("g2")
+      check("pressed again, it closes", barPanel.expanded("g2"), false)
+
+      console.log("typing finds things in every group")
+      barPanel.query = "gar"
+      check("this computer's lines step aside", barPanel.stops.indexOf("stop:notes"), -1)
+      check("a group with a match opens on it alone", JSON.stringify(barPanel.views["g1"].people[0].items.map(function(i) { return i.name })), JSON.stringify(["garden"]))
+      check("a stopped match is shown and is no stop", JSON.stringify(barPanel.stops), JSON.stringify(["group:g1"]))
+      check("a group with none is not shown", barPanel.views["g2"].shown, false)
+      check("nor a model that does not match", barPanel.shownModels.length, 0)
+      barPanel.query = "fedora"
+      check("a person's name finds what they lend, and their model", JSON.stringify(barPanel.stops), JSON.stringify(["copy:abc123", "group:g1", "open:abc123"]))
+      barPanel.query = "<b>"
+      check("a group's name finds the group", barPanel.views["g2"].shown, true)
+      barPanel.query = "zzz"
+      check("nothing found shows nothing", barPanel.stops.length, 0)
+      barPanel.query = ""
+
+      console.log("which lends are models is remembered")
+      fam.applyModels({ ok: true, lends: [
+        { label: "m1", person: "Cy", name: "coder", models: ["qwen"] },
+        { label: "n1", person: "Cy", name: "forgejo", models: [] },
+        { label: "u1", person: "Fedora", name: "flash", models: null }] })
+      check("a model found is listed", JSON.stringify(fam.models.map(function(m) { return m.label })), JSON.stringify(["m1"]))
+      check("an answer is kept, one not reached is not", JSON.stringify(Object.keys(fam._known).sort()), JSON.stringify(["m1", "n1"]))
+      fam.applyModels({ ok: true, lends: [
+        { label: "m1", person: "Cy", name: "coder", models: null },
+        { label: "u1", person: "Fedora", name: "flash", models: ["flash"] }] })
+      check("one kept is listed without being asked; one reached now is added",
+            JSON.stringify(fam.models.map(function(m) { return m.label + ":" + m.models.join("") })), JSON.stringify(["m1:qwen", "u1:flash"]))
+
+      console.log("a read of this computer alone keeps what the groups said")
+      show(running)
+      show({ svrngs: "running", groups: running.groups, mine: running.mine, listeners: [] })
+      check("the lends of the last full read stay", Object.keys(fam.answer.lends).join(","), "g1")
+      check("what listens here is the new read's", fam.answer.listeners.length, 0)
+      show({ svrngs: "stopped" })
+      check("svrngs stopped keeps nothing of it", fam.answer.lends, undefined)
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
     }
 

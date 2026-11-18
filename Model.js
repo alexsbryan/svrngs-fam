@@ -132,3 +132,59 @@ function lendsKey(answer) {
     (answer.lends[id].lent || []).forEach(function(l) { labels.push(labelOf(l.origin)) })
   return labels.sort().join(",")
 }
+
+// ---- A group, as the panel draws it at scale --------------------------------
+// What a group's people lend, by person, and what its folder carries, once
+// (an app the group carries is answered by every computer holding it; the
+// first, this computer's own when it has it, is the one opened). Each thing
+// matched against `query` (its name, its person, or the group's name).
+function groupView(answer, group, query) {
+  var lends = (running(answer) && answer.lends ? answer.lends[group.id] : null) || null
+  var q = String(query || "").trim().toLowerCase()
+  var inGroup = q === "" || String(group.name).toLowerCase().indexOf(q) >= 0
+  var hit = function(name, person) {
+    return inGroup || String(name).toLowerCase().indexOf(q) >= 0 || String(person).toLowerCase().indexOf(q) >= 0
+  }
+  var people = []
+  var byPerson = {}
+  var carried = []
+  var carriedNames = {}
+  var count = 0
+  ;((lends && lends.lent) || []).forEach(function(l) {
+    var item = { name: l.name, label: labelOf(l.origin), answering: l.answering !== false }
+    if (l.carried) {
+      if (carriedNames[l.name]) return
+      carriedNames[l.name] = true
+      count += 1
+      if (hit(l.name, "")) carried.push(item)
+      return
+    }
+    if (l.person === group.person) return
+    count += 1
+    if (!hit(l.name, l.person)) return
+    if (!byPerson[l.person]) { byPerson[l.person] = []; people.push({ person: l.person, items: byPerson[l.person] }) }
+    byPerson[l.person].push(item)
+  })
+  var gone = ((lends && lends.unanswered) || []).filter(function(p) { return q === "" || inGroup || String(p).toLowerCase().indexOf(q) >= 0 })
+  return {
+    people: people,
+    carried: carried,
+    unanswered: gone,
+    count: count,
+    read: lends !== null && !lends.error,
+    shown: q === "" || inGroup || people.length + carried.length + gone.length > 0
+  }
+}
+
+// A group's line, closed: how many things it shares, and who did not answer.
+function groupSummary(view, words) {
+  if (!view.read) return words.unread
+  var said = view.count === 1 ? words.one : words.many.replace("%1", view.count)
+  return view.unanswered.length > 0 ? said + " · " + words.quiet.replace("%1", view.unanswered.length) : said
+}
+
+// Whether a model matches what is typed.
+function modelShown(model, query) {
+  var q = String(query || "").trim().toLowerCase()
+  return q === "" || String(model.name).toLowerCase().indexOf(q) >= 0 || String(model.person).toLowerCase().indexOf(q) >= 0
+}

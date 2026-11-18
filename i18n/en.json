@@ -5,13 +5,14 @@
   "state.never-started": "svrngs is installed but hasn't run here yet",
   "state.not-installed": "svrngs isn't on this computer",
   "state.unreadable": "svrngs's answer couldn't be read",
-  "lent.count": { "one": "You lend %1 thing from here", "other": "You lend %1 things from here" },
-
+  "lent.count": {
+    "one": "You lend %1 thing from here",
+    "other": "You lend %1 things from here"
+  },
   "help.stopped": "Your people can't reach what you lend until it runs again.",
   "help.never-started": "Run svrngs once in a terminal to join or start a group.",
   "help.not-installed": "Install svrngs from your group's invite page, then open this again.",
   "action.start": "Start svrngs",
-
   "here.title": "On this computer",
   "here.lentTo": "Lent to %1",
   "here.lentNowhere": "Lent",
@@ -25,7 +26,6 @@
   "lend.name": "Name",
   "lend.group": "Group",
   "action.cancel": "Cancel",
-
   "models.title": "Models your people lend",
   "models.row": "%1 · %2",
   "models.none": "Nobody in your groups lends a model yet.",
@@ -33,16 +33,22 @@
   "models.quiet": "None of your people's lends answered as a model just now. Their computer may be off.",
   "action.copyAddress": "Copy address",
   "models.copied": "Copied. In your app, use it as the OpenAI-compatible address, and the text in ~/.svrngs/token as the key.",
-
   "groups.title": "Your groups",
-  "groups.row": "%1 · you're %2",
-  "groups.friendLend": "%1's %2",
   "groups.notRunning": "Not running now",
   "groups.unanswered": "%1's computer isn't answering",
   "here.notRunning": "Not running now: start it, and your people can open it",
   "action.invite": "Invite",
-  "action.open": "Open",
   "action.makeLink": "Make link",
   "invite.question": "A new invite link to %1 stops any earlier link letting new people in. Everyone already in stays.",
-  "working": "Working…"
+  "working": "Working…",
+  "find.placeholder": "Type to find an app, a model or a person",
+  "find.none": "Nothing in your groups is called “%1”",
+  "groups.thing": "1 thing shared",
+  "groups.things": "%1 things shared",
+  "groups.quiet": "%1 not answering",
+  "groups.unread": "couldn't ask this group",
+  "groups.shared": "Each opens as you, %1, on the computer that lends it, while it's on.",
+  "groups.carried": "The group's",
+  "groups.empty": "Nobody here shares anything yet.",
+  "action.home": "Home page"
 }

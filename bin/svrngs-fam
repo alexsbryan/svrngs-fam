@@ -6,12 +6,14 @@ never puts a value from svrngs into a shell string. It runs this helper with
 an argv list and reads one JSON object from its standard output.
 
 Verbs:
-  state [--full]                  svrngs's state; --full adds what each group
-                                  lends and what listens on this computer
+  state [--full | --here]         svrngs's state; --full adds what each group
+                                  lends and what listens on this computer,
+                                  --here only what listens on this computer
   share <port> <group> <name> [--program <kind>] [--password-stdin]
   unshare <name> [--group <group>]
-  models                          friends' lends that answer OpenAI's
-                                  v1/models, each with the address to use
+  models [--skip <label,...>]     friends' lends that answer OpenAI's
+                                  v1/models, each with the address to use;
+                                  those named in --skip are listed, not asked
   open [--lend <label>] [--at <path>]
                                   opens it in the browser, signed in
   link <group>                    makes a new invite link and copies it
@@ -264,8 +266,12 @@ def state(full):
         ]
         report["groupsCut"] = over
         report["svrngs"] = "running"
-        if full:
-            report["lends"] = {g["id"]: lends_of(at, secret, g["id"]) for g in report["groups"] if not g["left"]}
+        if full == "full":
+            # Asked together: the panel waits on the slowest group, not the sum.
+            asked = [g["id"] for g in report["groups"] if not g["left"]]
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                report["lends"] = dict(zip(asked, pool.map(lambda ns: lends_of(at, secret, ns), asked)))
+        if full in ("full", "here"):
             skip = {at[1]} | {m["port"] for m in report["mine"] if m["port"]}
             report["listeners"] = listeners(skip)
     except Stopped:
@@ -294,6 +300,9 @@ def lends_of(at, secret, namespace):
                 # Whether its program answered its lender just now; None from
                 # an svrngs that does not say (svrngs door.rs `answering`).
                 "answering": l.get("answering") if isinstance(l.get("answering"), bool) else None,
+                # An app the group's folder carries, served by every computer
+                # in it: listed once, as the group's, not one person's.
+                "carried": bool(l.get("group")),
             }
             for l in lent
             if isinstance(l, dict)
@@ -352,7 +361,7 @@ def lend_at(origin, port):
     return match.group(1)
 
 
-def models():
+def models(skip=frozenset()):
     """Friends' lends that answer OpenAI's v1/models through svrngs, asked
     together, each given 4 s. A lend that does not answer is not a model."""
     held, refused = connected()
@@ -390,22 +399,30 @@ def models():
             conn.request("GET", "/v1/models", headers={"Host": f"{label}.localhost:{at[1]}", "Authorization": f"Bearer {secret}"})
             reply = conn.getresponse()
             raw = reply.read(MAX_BODY + 1)
-            if reply.status != 200 or len(raw) > MAX_BODY:
+            # Its lender's program not reached (svrngs answers 502-504): not
+            # known, so asked again next time, never remembered as no model.
+            if reply.status in (502, 503, 504):
                 return None
+            if reply.status != 200 or len(raw) > MAX_BODY:
+                return []
             listed = json.loads(raw).get("data")
-            ids = [text(m.get("id")) for m in listed if isinstance(m, dict) and m.get("id")] if isinstance(listed, list) else None
-            return ids[:MAX_ROWS] if ids else None
-        except (OSError, http.client.HTTPException, ValueError, AttributeError):
+            ids = [text(m.get("id")) for m in listed if isinstance(m, dict) and m.get("id")] if isinstance(listed, list) else []
+            return ids[:MAX_ROWS]
+        except (ValueError, AttributeError):
+            return []
+        except (OSError, http.client.HTTPException):
             return None
         finally:
             conn.close()
 
-    found = []
+    # Each candidate with what it answered: its models, [] for none, or null
+    # when it was not asked (--skip) or could not be reached.
+    asking = [label for label in candidates if label not in skip]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for label, ids in zip(candidates, pool.map(probe, candidates)):
-            if ids:
-                found.append({**candidates[label], "models": ids})
-    return {"ok": True, "models": found, "asked": len(candidates)}
+        answered = dict(zip(asking, pool.map(probe, asking)))
+    lends = [{**c, "models": answered.get(label)} for label, c in candidates.items()]
+    found = [l for l in lends if l["models"]]
+    return {"ok": True, "models": found, "lends": lends, "asked": len(asking)}
 
 
 def open_in_browser(body):
@@ -453,7 +470,7 @@ def main(argv):
         return {"ok": False, "said": __doc__.strip().splitlines()[0]}
     verb, rest = argv[0], argv[1:]
     if verb == "state":
-        return state("--full" in rest)
+        return state("full" if "--full" in rest else "here" if "--here" in rest else "")
     if verb == "share" and len(rest) >= 3 and rest[0].isdigit():
         port, group, name = rest[:3]
         args = ["share", port, "--group", group, "--name", name]
@@ -467,7 +484,8 @@ def main(argv):
             args += ["--group", rest[rest.index("--group") + 1]]
         return run_svrngs(args)
     if verb == "models":
-        return models()
+        skip = rest[rest.index("--skip") + 1].split(",") if "--skip" in rest and rest.index("--skip") + 1 < len(rest) else []
+        return models(set(skip))
     if verb == "open":
         body = {}
         for flag, key in (("--lend", "lend"), ("--at", "at")):
