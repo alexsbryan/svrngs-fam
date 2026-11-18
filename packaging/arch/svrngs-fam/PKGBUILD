@@ -7,7 +7,7 @@ pkgdesc="Omarchy bar plugin for svrngs: lend what you're building, use your peop
 arch=('any')
 url="https://github.com/alexsbryan/svrngs-fam"
 license=('MIT')
-depends=('svrngs' 'python' 'iproute2' 'wl-clipboard')
+depends=('svrngs' 'python' 'iproute2' 'wl-clipboard' 'gnupg')
 install=svrngs-fam.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('74ef7f7eb239e8fbc6b89a4a79907b289ad2c1e52c2b13a9baa2ba5b496b45db')
@@ -20,5 +20,6 @@ package() {
   install -Dm644 -t "$dest/i18n" "$src"/i18n/*.json
   install -Dm755 "$src/bin/svrngs-fam" "$dest/bin/svrngs-fam"
   install -Dm755 "$src/setup-user" "$dest/setup-user"
+  install -Dm644 -t "$dest/keys" "$src/keys/svrngs-release-key.asc" "$src/keys/svrngs-release-key.fpr"
   install -Dm644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

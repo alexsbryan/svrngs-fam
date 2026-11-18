@@ -61,13 +61,20 @@ Panel {
   property string lendGroup: ""
   // The group whose new invite link waits for its second press.
   property string inviting: ""
+  // Get svrngs waiting for its second press, and the invite link given, if any.
+  property bool getting: false
+  property string getLink: ""
 
   // The keyboard's cursor: one stop per button, in the order they are drawn.
   property bool cursorActive: false
   property int cursor: 0
   readonly property var stops: {
     var out = []
-    if (!isRunning) return fam.state === "stopped" ? ["start"] : []
+    if (!isRunning) {
+      if (fam.state === "stopped") return ["start"]
+      if (fam.state === "not-installed") return getting ? ["get:confirm", "get:cancel"] : ["get"]
+      return []
+    }
     if (!finding) {
       lent.forEach(function(l) { out.push("stop:" + l.name) })
       offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
@@ -101,7 +108,7 @@ Panel {
     wanted: root.opened
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; cursorActive = false; cursor = 0; query = "" }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; cursorActive = false; cursor = 0; query = "" }
   onQueryChanged: cursor = 0
 
   function expanded(id) {
@@ -128,6 +135,9 @@ Panel {
     var kind = stop.split(":")[0]
     var rest = stop.slice(kind.length + 1)
     if (kind === "start") startSvrngs()
+    else if (stop === "get") { getting = true; cursorTo("get:confirm") }
+    else if (stop === "get:confirm") getSvrngs()
+    else if (stop === "get:cancel") getting = false
     else if (kind === "stop") root.stop(rest)
     else if (stop === "lend:confirm") lend()
     else if (stop === "lend:cancel") lending = null
@@ -181,6 +191,13 @@ Panel {
     if (!model) return
     Quickshell.execDetached(["wl-copy", "--", model.address])
     fam.tell(strings.t("models.copied"), true)
+  }
+
+  // svrngs's own installer, run by the helper once its signature verifies
+  // against the svrngs release key; with an invite link, it joins that group.
+  function getSvrngs() {
+    var link = getLink.trim()
+    if (fam.act("get", link === "" ? ["get"] : ["get", "--link", link])) getting = false
   }
 
   function startSvrngs() {
@@ -387,6 +404,33 @@ Panel {
               words: strings.t("action.start")
               stop: "start"
               onClicked: root.startSvrngs()
+            }
+            Act {
+              visible: fam.state === "not-installed" && !root.getting
+              doing: "get"
+              words: strings.t("action.get")
+              stop: "get"
+              onClicked: root.getting = true
+            }
+            // The second press: what getting svrngs does, said before it does.
+            Column {
+              visible: fam.state === "not-installed" && root.getting
+              width: parent.width
+              spacing: Style.space(6)
+              Note { text: strings.t("get.meaning") }
+              TextField {
+                width: parent.width
+                text: root.getLink
+                foreground: root.foreground
+                placeholderText: strings.t("get.link")
+                onTextEdited: root.getLink = text
+                onAccepted: root.getSvrngs()
+              }
+              Row {
+                spacing: Style.space(8)
+                Act { doing: "get"; words: strings.t("action.get"); stop: "get:confirm"; onClicked: root.getSvrngs() }
+                Act { words: strings.t("action.cancel"); stop: "get:cancel"; onClicked: root.getting = false }
+              }
             }
           }
 

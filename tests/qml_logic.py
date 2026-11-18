@@ -33,6 +33,7 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-qml-") as directory:
     shutil.copy(ROOT / "tests/qml/shell.qml", harness / "shell.qml")
     for name in ("Service.qml", "Model.js"):
         shutil.copy(ROOT / name, harness / name)
+    shutil.copytree(ROOT / "keys", harness / "keys")
     shutil.copytree(ROOT / "i18n", harness / "i18n")
     shutil.copytree(ROOT / "bin", harness / "bin")
     # Panel.qml extends qs.Ui's Panel; beside it under its own name it would
@@ -55,8 +56,10 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-qml-") as directory:
         "HOME": str(home),
         "SVRNGS_DIR": str(home / ".svrngs"),
         "PATH": "/usr/bin:/bin",
-        # No svrngs, whatever this computer has installed.
+        # No svrngs, whatever this computer has installed, and no release:
+        # Get svrngs here asks a port nothing listens on, never the network.
         "SVRNGS_FAM_SVRNGS": "",
+        "SVRNGS_FAM_RELEASES": "http://127.0.0.1:9/",
         "XDG_RUNTIME_DIR": str(runtime),
         "QT_QPA_PLATFORM": "offscreen",
     }

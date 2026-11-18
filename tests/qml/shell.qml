@@ -282,6 +282,23 @@ ShellRoot {
       check("what listens here is the new read's", fam.answer.listeners.length, 0)
       show({ svrngs: "stopped" })
       check("svrngs stopped keeps nothing of it", fam.answer.lends, undefined)
+
+      console.log("no svrngs here: Get svrngs, a second press")
+      show({ svrngs: "not-installed" })
+      barPanel.cursorActive = true
+      check("its one stop is Get svrngs", JSON.stringify(barPanel.stops), JSON.stringify(["get"]))
+      barPanel.activate("get")
+      check("the first press asks first", barPanel.getting, true)
+      check("and runs nothing", fam.doing, "")
+      barPanel.getLink = "  svrngs:AbCdEf0123456789 "
+      barPanel.getSvrngs()
+      check("the second press runs the helper's get, with the link", JSON.stringify(fam.lastAsked), JSON.stringify(["get", "--link", "svrngs:AbCdEf0123456789"]))
+      settle.then = harness.afterGet
+      settle.start()
+    }
+
+    function afterGet() {
+      check("a release that can't be read is said, and nothing is installed", fam.said.indexOf("couldn't be read") >= 0 && !fam.saidOk, true)
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
     }
 

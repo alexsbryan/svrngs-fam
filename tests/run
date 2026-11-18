@@ -4,5 +4,6 @@ set -e
 cd "$(dirname "$0")"
 ./helper_test.py | tail -1
 ./setup_test.py | tail -1
+./get_test.py | tail -1
 ./package_test.py | tail -1
 ./qml_logic.py | tail -1

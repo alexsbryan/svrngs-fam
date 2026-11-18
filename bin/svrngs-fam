@@ -17,6 +17,9 @@ Verbs:
   open [--lend <label>] [--at <path>]
                                   opens it in the browser, signed in
   link <group>                    makes a new invite link and copies it
+  get [--link <invite link>]      installs svrngs with its own installer, once
+                                  the installer's signature verifies against
+                                  the svrngs release key in ../keys
 
 It reads svrngs's public surface only: the `svrngs` command, the `api` and
 `token` files in svrngs's data directory, and the `/v1/` routes behind the
@@ -31,7 +34,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -465,6 +471,84 @@ def invite(group):
     return {"ok": True, "said": "Invite link copied. It works for a day, while this computer is on."}
 
 
+# svrngs's latest release, where its signed installer is kept (svrngs
+# scripts/sign-release.sh). SVRNGS_FAM_RELEASES changes where it comes from,
+# for the tests; whose signature it needs is only ever the key in ../keys.
+RELEASES = "https://github.com/alexsbryan/svrngs/releases/latest/download"
+# Where the installer gets svrngs when there is no invite link: the page
+# svrngs's README starts a group from.
+PAGE = "https://group.svrnme.sh/"
+KEYS = Path(__file__).resolve().parent.parent / "keys"
+MAX_INSTALLER = 1024 * 1024
+LINK = re.compile(r"(svrngs:[A-Za-z0-9_-]{8,512}|https://[A-Za-z0-9.-]+/[^\s'\"]{0,1024})")
+
+
+def fetch(url):
+    """A release file's bytes, at most MAX_INSTALLER, or None when the
+    release has no such file."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as reply:
+            data = reply.read(MAX_INSTALLER + 1)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    if len(data) > MAX_INSTALLER:
+        raise ValueError(f"{url} is larger than {MAX_INSTALLER // 1024} KiB")
+    return data
+
+
+def signed_by_release_key(data, signature, home):
+    """Whether `signature` is a good signature of `data` by the svrngs
+    release key, the one key in ../keys whose fingerprint is pinned there.
+    Checked in a keyring of its own, which holds that key alone."""
+    pinned = (KEYS / "svrngs-release-key.fpr").read_text().strip().upper()
+    (home / "data").write_bytes(data)
+    (home / "data.sig").write_bytes(signature)
+    gpg = ["gpg", "--batch", "--no-tty", "--homedir", str(home / "gnupg")]
+    subprocess.run(gpg + ["--import", str(KEYS / "svrngs-release-key.asc")], capture_output=True, timeout=30, check=True)
+    checked = subprocess.run(gpg + ["--status-fd", "1", "--verify", str(home / "data.sig"), str(home / "data")],
+                             capture_output=True, text=True, timeout=30)
+    valid = [line.split() for line in checked.stdout.splitlines() if line.startswith("[GNUPG:] VALIDSIG ")]
+    # VALIDSIG names the signing key and, last, its primary key's fingerprint.
+    return checked.returncode == 0 and any(pinned in (v[2].upper(), v[-1].upper()) for v in valid)
+
+
+def get_svrngs(link):
+    """svrngs installed by its own installer from its latest release, run
+    only once its signature verifies: for this person alone, no sudo, then
+    their home page opens (svrngs web/install.sh)."""
+    if link is not None and not LINK.fullmatch(link):
+        return {"ok": False, "said": "That doesn't look like a svrngs invite link. Paste the whole link your friend sent."}
+    if shutil.which("gpg") is None:
+        return {"ok": False, "said": "gpg isn't installed, so svrngs's installer can't be checked. Install gnupg, then try again."}
+    base = os.environ.get("SVRNGS_FAM_RELEASES", RELEASES).rstrip("/")
+    try:
+        installer, signature = fetch(f"{base}/install.sh"), fetch(f"{base}/install.sh.sig")
+    except (OSError, ValueError) as e:
+        return {"ok": False, "said": f"svrngs's release couldn't be read: {text(str(e))}"}
+    if installer is None or signature is None:
+        return {"ok": False, "said": "svrngs's latest release has no signed installer yet. Its README says how to install it: https://github.com/alexsbryan/svrngs#start-a-group"}
+    with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-") as directory:
+        home = Path(directory)
+        (home / "gnupg").mkdir(mode=0o700)
+        try:
+            good = signed_by_release_key(installer, signature, home)
+        except (OSError, subprocess.SubprocessError):
+            good = False
+        if not good:
+            return {"ok": False, "said": "svrngs's installer isn't signed by the svrngs release key, so it wasn't run."}
+        try:
+            done = subprocess.run(["sh", str(home / "data"), link or PAGE], stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "said": "svrngs's installer didn't finish within ten minutes."}
+    said = "\n".join(line for line in (done.stdout + done.stderr).strip().splitlines()[-6:])
+    if done.returncode != 0:
+        return {"ok": False, "said": said or f"svrngs's installer stopped (exit {done.returncode})."}
+    return {"ok": True, "said": "svrngs is installed and running. Your home page opens in your browser."}
+
+
 def main(argv):
     if not argv:
         return {"ok": False, "said": __doc__.strip().splitlines()[0]}
@@ -494,6 +578,9 @@ def main(argv):
         return open_in_browser(body)
     if verb == "link" and rest:
         return invite(rest[0])
+    if verb == "get":
+        link = rest[rest.index("--link") + 1] if "--link" in rest and rest.index("--link") + 1 < len(rest) else None
+        return get_svrngs(link.strip() if link else None)
     return {"ok": False, "said": f"unknown verb or arguments: {text(' '.join(argv))}"}
 
 
