@@ -24,8 +24,23 @@ computer.
 
 ## Packages
 
-`packaging/arch/` holds the two packages. `packaging/arch/bump <version>`
-points `svrngs-bin` at a new svrngs release, using that release's checksums.
+`packaging/arch/` holds the two packages. `svrngs-bin` is svrngs's own
+[`packaging/arch`](https://github.com/alexsbryan/svrngs/tree/main/packaging/arch),
+copied here for each release by `bump`, given a svrngs checkout and,
+if not its HEAD, the commit to copy:
+
+```
+packaging/arch/bump 1.11.1 ~/svrngs 3b9a0506
+```
+
+It writes all of `packaging/arch/svrngs-bin/`, and `SOURCE` there says
+where each file came from, so change svrngs's package and bump rather than
+edit the copy. On top of svrngs's files go only what Omarchy's package
+repository needs: the svrngs release key as `keys/pgp/<fingerprint>.asc`,
+and each file in `packaging/arch/omarchy/` in place of svrngs's, with its
+sum. That's `updated-by`, the line `svrngs update` says, worded for
+Omarchy.
+
 makepkg checks each svrngs download against the svrngs release key, so
 import it once with `gpg --import packaging/arch/svrngs-bin/keys/pgp/*.asc`.
 Build outside this folder, because Omarchy refuses a plugin folder that
@@ -36,6 +51,8 @@ export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svr
 (cd packaging/arch/svrngs-bin && makepkg -f)
 (cd packaging/arch/svrngs-fam && makepkg -f)
 ```
+
+The first builds `svrngs-give-bin` beside `svrngs-bin`, as svrngs's does.
 
 `omarchy/` has drafts of `omarchy install service svrngs` and its removal,
 for proposing to Omarchy.
