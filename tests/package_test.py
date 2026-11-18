@@ -1,16 +1,16 @@
 #!/usr/bin/python3 -I
-"""svrngs-bin's setup-user and packaging/bump, in scratch directories.
+"""setup-svrngs and packaging/arch/bump, in scratch directories.
 
-setup-user moves an install made by svrngs's own install line aside, never
+setup-svrngs moves an install made by svrngs's own install line aside, never
 deleting it and never touching ~/.svrngs, and starts the packaged service;
 systemctl is stood in for, so nothing reaches this computer's own svrngs.
-bump points the package at a release by its SHA256SUMS, and refuses one
-that lacks a platform.
+bump copies svrngs-bin from a scratch svrngs's packaging/arch, swapping in
+only omarchy/'s files and their sums, and refuses a commit it couldn't
+copy honestly.
 """
 
 import hashlib
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP = ROOT / "packaging/arch/svrngs-bin/setup-user"
+SETUP = ROOT / "setup-svrngs"
 failures = []
 
 
@@ -97,26 +97,82 @@ with tempfile.TemporaryDirectory() as scratch:
     check("and says where to look", "systemctl --user status svrngs" in done.stderr, True)
 
     print("bump")
-    copy = Path(scratch) / "packaging"
-    shutil.copytree(ROOT / "packaging/arch", copy / "arch")
-    pkgbuild = copy / "arch/svrngs-bin/PKGBUILD"
-    x, a = "1" * 64, "2" * 64
-    sums = Path(scratch) / "SHA256SUMS"
-    sums.write_text(f"{x}  svrngs-linux-x86_64.tar.gz\n{a}  svrngs-linux-aarch64.tar.gz\n{'3' * 64}  give-linux-x86_64.tar.gz\n")
-    (copy / "arch/svrngs-bin/setup-user").write_text("#!/bin/bash\n# changed\n")
-    done = subprocess.run([str(copy / "arch/bump"), "1.11.0", "--sums", str(sums)], capture_output=True, text=True)
-    s = pkgbuild.read_text()
+    svrngs, arch = Path(scratch) / "svrngs", Path(scratch) / "svrngs/packaging/arch"
+    arch.mkdir(parents=True)
+    # Only this scratch config, so no one's hooks or signing reach these commits.
+    quiet = {"PATH": "/usr/bin:/bin", "HOME": scratch, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(svrngs), *args], env=quiet, check=True, capture_output=True, text=True).stdout.strip()
+
+    def sha(data):
+        return hashlib.sha256(data).hexdigest()
+
+    def bump(*args):
+        return subprocess.run([str(fam / "bump"), *args, str(svrngs)], env=quiet, capture_output=True, text=True)
+
+    def tree(folder):
+        return {p.relative_to(folder): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+    theirs = {"updated-by": b"pacman installed this svrngs\n", "svrngs.service": b"[Service]\nExecStart=/usr/bin/svrngs\n",
+              "svrngs-bin.install": b"post_install() { :; }\n", "README.md": b"# Building it in svrngs\n"}
+    for name, data in theirs.items():
+        (arch / name).write_bytes(data)
+    fpr = "46B4D67C5E6621093BB1AB2B057BF9082AA03CFB"
+    pkgbuild = (f"pkgbase=svrngs-bin\npkgver=1.12.0\npkgrel=1\nvalidpgpkeys=('{fpr}')\nsource=(updated-by svrngs.service)\n"
+                f"sha256sums=('{sha(theirs['updated-by'])}'\n            '{sha(theirs['svrngs.service'])}')\n"
+                f"sha256sums_x86_64=('{'1' * 64}' '{'2' * 64}')\n")
+    (arch / "PKGBUILD").write_text(pkgbuild)
+    (svrngs / "svrngs-release-key.asc").write_bytes(b"the svrngs release key")
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-qm", "packaging/arch")
+    git("init", "-q", "--bare", str(Path(scratch) / "svrngs.git"))
+    git("remote", "add", "origin", str(Path(scratch) / "svrngs.git"))
+    git("push", "-q", "origin", "main")
+    git("fetch", "-q", "origin")
+    commit = git("rev-parse", "HEAD")
+
+    fam = Path(scratch) / "fam"
+    shutil.copytree(ROOT / "packaging/arch", fam)
+    out = fam / "svrngs-bin"
+    (out / "setup-user").write_text("left by an older svrngs-bin\n")
+    ours = (fam / "omarchy/updated-by").read_bytes()
+    done = bump("1.12.0")
     check("succeeds", done.returncode, 0)
-    check("the version", re.search(r"(?m)^pkgver=(.*)$", s).group(1), "1.11.0")
-    check("x86_64's sum from the release, its signature left to the key", re.search(r"(?m)^sha256sums_x86_64=\('(\w+)' 'SKIP'\)$", s).group(1), x)
-    check("aarch64's sum from the release, its signature left to the key", re.search(r"(?m)^sha256sums_aarch64=\('(\w+)' 'SKIP'\)$", s).group(1), a)
-    own = re.findall(r"'(\w+)'", re.search(r"(?m)^sha256sums=\((.*)\)$", s).group(1))
-    check("the package's own files' sums from their bytes, an edit included",
-          own[-1], hashlib.sha256(b"#!/bin/bash\n# changed\n").hexdigest())
-    sums.write_text(f"{x}  svrngs-linux-x86_64.tar.gz\n")
-    done = subprocess.run([str(copy / "arch/bump"), "1.12.0", "--sums", str(sums)], capture_output=True, text=True)
-    check("a release missing a platform is refused", done.returncode != 0 and "aarch64" in done.stderr, True)
-    check("and nothing changed", re.search(r"(?m)^pkgver=(.*)$", pkgbuild.read_text()).group(1), "1.11.0")
+    check("a file the PKGBUILD pins is svrngs's, byte for byte", (out / "svrngs.service").read_bytes(), theirs["svrngs.service"])
+    check("one it doesn't pin says where it came from",
+          (out / "svrngs-bin.install").read_bytes(),
+          f"# Copied by ../bump from svrngs packaging/arch/svrngs-bin.install@{commit}.\n".encode() + theirs["svrngs-bin.install"])
+    check("omarchy/updated-by in place of svrngs's", (out / "updated-by").read_bytes(), ours)
+    check("the PKGBUILD is svrngs's, but for updated-by's sum",
+          (out / "PKGBUILD").read_text(),
+          f"# Copied by ../bump from svrngs packaging/arch/PKGBUILD@{commit}, with omarchy/updated-by's sum.\n"
+          + pkgbuild.replace(sha(theirs["updated-by"]), sha(ours)))
+    check("the release key, where Omarchy's repository reads it", (out / f"keys/pgp/{fpr}.asc").read_bytes(), b"the svrngs release key")
+    check("svrngs's README stays in svrngs", (out / "README.md").exists(), False)
+    check("nothing an older copy left", (out / "setup-user").exists(), False)
+    check("SOURCE names every file's origin",
+          sorted(line.split("\t")[0] for line in (out / "SOURCE").read_text().splitlines() if not line.startswith("#")),
+          sorted(["PKGBUILD", "svrngs.service", "svrngs-bin.install", "updated-by", f"keys/pgp/{fpr}.asc"]))
+
+    copied = tree(out)
+    done = bump("1.13.0")
+    check("another version is refused", done.returncode != 0 and "pkgver=1.12.0, not 1.13.0" in done.stderr, True)
+    check("and nothing changed", tree(out), copied)
+    (arch / "PKGBUILD").write_text(pkgbuild.replace(f"'{sha(theirs['updated-by'])}'\n            ", ""))
+    git("commit", "-qam", "updated-by, no longer pinned")
+    git("push", "-q", "origin", "main")
+    git("fetch", "-q", "origin")
+    done = bump("1.12.0")
+    check("a swap for a file svrngs doesn't pin is refused", done.returncode != 0 and "pins no updated-by" in done.stderr, True)
+    check("and nothing changed", tree(out), copied)
+    (arch / "PKGBUILD").write_text(pkgbuild)
+    git("commit", "-qam", "not pushed")
+    done = bump("1.12.0")
+    check("a commit on no pushed branch is refused", done.returncode != 0 and "no pushed branch" in done.stderr, True)
+    check("and nothing changed", tree(out), copied)
 
 print("ALL OK" if not failures else f"{len(failures)} FAILED")
 sys.exit(1 if failures else 0)

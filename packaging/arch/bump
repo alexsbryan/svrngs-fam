@@ -1,60 +1,103 @@
 #!/usr/bin/python3 -I
-"""Point svrngs-bin at a release: bump <version> [--sums <SHA256SUMS file>]
+"""Copy svrngs-bin from svrngs: bump <version> <svrngs checkout> [<commit>]
 
-Sets pkgver (and pkgrel to 1), each platform's tarball sum from the
-release's SHA256SUMS (the one svrngs's build-release.sh writes, kept on its
-GitHub Release), and the sums of the package's own files from their bytes
-here. Without --sums it reads the release's SHA256SUMS from GitHub. A
-release missing a platform the package builds for is refused, never left
-at an old sum.
+svrngs's packaging/arch is the one definition of svrngs-bin. This writes
+svrngs-bin/ from it at <commit>, or the checkout's HEAD: every file there
+but README.md, which is svrngs's guide to building it in svrngs. On top go
+only what Omarchy needs: svrngs's release key as keys/pgp/<fingerprint>.asc,
+the layout Omarchy's package repository reads, and each file in omarchy/ in
+place of svrngs's file of that name, with its sum in the PKGBUILD swapped to
+match. Nothing else in the PKGBUILD changes. A copied file the PKGBUILD
+doesn't pin by its sum starts with a line naming where it came from; SOURCE
+names every file's origin. It refuses, changing nothing, a commit on no
+pushed branch, a PKGBUILD there that isn't <version>, and a file in
+omarchy/ that svrngs's PKGBUILD doesn't pin.
 """
 
 import hashlib
 import re
+import shutil
+import subprocess
 import sys
-import urllib.request
+import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent / "svrngs-bin"
-PKGBUILD = HERE / "PKGBUILD"
-RELEASES = "https://github.com/alexsbryan/svrngs/releases/download"
-PLATFORMS = {"x86_64": "svrngs-linux-x86_64.tar.gz", "aarch64": "svrngs-linux-aarch64.tar.gz"}
+HERE = Path(__file__).resolve().parent
+OUT = HERE / "svrngs-bin"
+SWAPS = HERE / "omarchy"
+# svrngs's guide to building the package there; DEVELOPMENT.md links it.
+NOT_COPIED = {"README.md"}
+KEY = "svrngs-release-key.asc"  # at svrngs's root, as its RELEASES.md names it
 
 
-def sums_of(text):
-    found = {}
-    for line in text.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]):
-            found[parts[1].lstrip("*")] = parts[0]
-    return found
+def git(repo, *args):
+    done = subprocess.run(["git", "-C", repo, *args], capture_output=True)
+    if done.returncode:
+        raise SystemExit(f"bump: git {' '.join(args)}: {done.stderr.decode().strip()}")
+    return done.stdout
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
 
 
 def main(argv):
-    if not argv or not re.fullmatch(r"\d+\.\d+\.\d+", argv[0]):
+    if len(argv) not in (2, 3) or not re.fullmatch(r"\d+\.\d+\.\d+", argv[0]):
         raise SystemExit(__doc__.strip().splitlines()[0])
-    version = argv[0]
-    if "--sums" in argv:
-        text = Path(argv[argv.index("--sums") + 1]).read_text()
-    else:
-        with urllib.request.urlopen(f"{RELEASES}/v{version}/SHA256SUMS", timeout=30) as reply:
-            text = reply.read().decode()
-    released = sums_of(text)
-    missing = [name for name in PLATFORMS.values() if name not in released]
-    if missing:
-        raise SystemExit(f"bump: v{version}'s SHA256SUMS lists no {', '.join(missing)}, so nothing changed")
+    version, repo = argv[0], argv[1]
+    ref = argv[2] if len(argv) == 3 else "HEAD"
+    commit = git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").decode().strip()
+    if not git(repo, "branch", "-r", "--contains", commit).strip():
+        raise SystemExit(f"bump: svrngs {commit[:12]} is on no pushed branch, so no one else could check the copy; nothing changed")
 
-    s = PKGBUILD.read_text()
-    s = re.sub(r"(?m)^pkgver=.*$", f"pkgver={version}", s)
-    s = re.sub(r"(?m)^pkgrel=.*$", "pkgrel=1", s)
-    for arch, name in PLATFORMS.items():
-        # The tarball's sum, and SKIP for its signature, which the key checks.
-        s = re.sub(rf"(?m)^sha256sums_{arch}=\(.*\)$", f"sha256sums_{arch}=('{released[name]}' 'SKIP')", s)
-    local = re.search(r"(?m)^source=\((.*)\)$", s).group(1).split()
-    own = " ".join(f"'{hashlib.sha256((HERE / f).read_bytes()).hexdigest()}'" for f in local)
-    s = re.sub(r"(?m)^sha256sums=\(.*\)$", f"sha256sums=({own})", s)
-    PKGBUILD.write_text(s)
-    print(f"svrngs-bin is v{version}: x86_64 {released[PLATFORMS['x86_64']][:12]}…, aarch64 {released[PLATFORMS['aarch64']][:12]}…")
+    files, origin = {}, {}
+    for path in git(repo, "ls-tree", "-r", "--name-only", commit, "--", "packaging/arch/").decode().splitlines():
+        name = path[len("packaging/arch/"):]
+        if name not in NOT_COPIED:
+            files[name] = git(repo, "show", f"{commit}:{path}")
+            origin[name] = f"svrngs packaging/arch/{name}@{commit}"
+    pkgbuild = files.get("PKGBUILD", b"").decode()
+    found = re.search(r"(?m)^pkgver=(\S+)$", pkgbuild)
+    if not found or found.group(1) != version:
+        said = f"pkgver={found.group(1)}" if found else "no PKGBUILD"
+        raise SystemExit(f"bump: svrngs {commit[:12]} has {said}, not {version}; nothing changed")
+    keys = re.search(r"(?m)^validpgpkeys=\(([^)]*)\)", pkgbuild)
+    fingerprints = re.findall(r"[0-9A-F]{40}", keys.group(1)) if keys else []
+    if len(fingerprints) != 1:
+        raise SystemExit(f"bump: svrngs {commit[:12]}'s PKGBUILD names {len(fingerprints)} release keys, not one; nothing changed")
+
+    for swap in sorted(SWAPS.iterdir()):
+        theirs, ours = files.get(swap.name), swap.read_bytes()
+        if theirs is None or pkgbuild.count(sha(theirs)) != 1:
+            raise SystemExit(f"bump: svrngs's PKGBUILD pins no {swap.name} by its sum, so omarchy/{swap.name} has nothing to replace; nothing changed")
+        pkgbuild = pkgbuild.replace(sha(theirs), sha(ours))
+        files[swap.name] = ours
+        origin[swap.name] = f"svrngs-fam packaging/arch/omarchy/{swap.name}, in place of svrngs's"
+        origin["PKGBUILD"] += f", with omarchy/{swap.name}'s sum"
+    files["PKGBUILD"] = pkgbuild.encode()
+
+    for name, data in files.items():
+        if sha(data) not in pkgbuild:
+            # Not pinned, so a line naming its origin changes nothing makepkg checks.
+            line = f"# Copied by ../bump from {origin[name]}.\n".encode()
+            shebang = data.split(b"\n", 1)[0] + b"\n" if data.startswith(b"#!") else b""
+            files[name] = shebang + line + data[len(shebang):]
+    key = f"keys/pgp/{fingerprints[0]}.asc"
+    files[key] = git(repo, "show", f"{commit}:{KEY}")
+    origin[key] = f"svrngs {KEY}@{commit}"
+    files["SOURCE"] = ("# Where each file here came from. ../bump writes this folder: change\n"
+                       "# svrngs's packaging/arch or ../omarchy/, then run it again.\n"
+                       + "".join(f"{name}\t{origin[name]}\n" for name in sorted(origin))).encode()
+
+    fresh = Path(tempfile.mkdtemp(prefix=".svrngs-bin.", dir=HERE))
+    for name, data in files.items():
+        (fresh / name).parent.mkdir(parents=True, exist_ok=True)
+        (fresh / name).write_bytes(data)
+    fresh.chmod(0o755)
+    shutil.rmtree(OUT, ignore_errors=True)
+    fresh.rename(OUT)
+    swapped = ", ".join(p.name for p in sorted(SWAPS.iterdir()))
+    print(f"svrngs-bin is {version}, copied from svrngs {commit[:12]}, with omarchy/'s {swapped}")
 
 
 if __name__ == "__main__":
