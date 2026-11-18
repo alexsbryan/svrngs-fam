@@ -1,0 +1,315 @@
+#!/usr/bin/python3 -I
+"""svrngs.fam's helper: every read and every action the bar plugin takes.
+
+The plugin's QML never reads the token, never builds an HTTP request and
+never puts a value from svrngs into a shell string. It runs this helper with
+an argv list and reads one JSON object from its standard output.
+
+Verbs:
+  state [--full]                  svrngs's state; --full adds what each group
+                                  lends and what listens on this computer
+  share <port> <group> <name> [--program <kind>] [--password-stdin]
+  unshare <name> [--group <group>]
+  open [--lend <label>] [--at <path>]
+  link <group>
+
+It reads svrngs's public surface only: the `svrngs` command, the `api` and
+`token` files in svrngs's data directory, and the `/v1/` routes behind the
+token. It also reads `lends/*.json` there, a file format svrngs does not
+promise, for the one fact no route gives: which port each lend serves.
+"""
+
+import http.client
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+MAX_BODY = 256 * 1024
+MAX_ROWS = 200
+MAX_TEXT = 200
+TIMEOUT = 5.0
+LENDS_TIMEOUT = 8.0  # each lender gets up to 3 s to answer (svrngs DESIGN.md:714-727)
+
+# Never offered for lending: ports and programs that act as this person or
+# show their sessions. In svrngs's Omarchy testing one Enter on a default row
+# lent a browser's debug port (docs/OMARCHY.md §5 G).
+DENY_PORTS = {9222, 9229}
+DENY_PROGRAMS = {"firefox", "chromium", "chrome", "claude", "cupsd", "svrngs"}
+# A lend opened to this Wi-Fi listens at 40000 + hash(label) % 9000
+# (svrngs room.rs:63-69).
+ROOM_PORTS = range(40000, 49000)
+
+
+def text(value):
+    """A string from svrngs or the system, bounded."""
+    s = "" if value is None else str(value)
+    return s if len(s) <= MAX_TEXT else s[: MAX_TEXT - 1] + "…"
+
+
+def rows(values):
+    values = list(values or [])
+    return values[:MAX_ROWS], len(values) > MAX_ROWS
+
+
+def data_dir():
+    named = os.environ.get("SVRNGS_DIR")
+    return Path(named) if named else Path.home() / ".svrngs"
+
+
+def svrngs_command():
+    """The svrngs binary: on PATH, else where its install line puts it."""
+    found = shutil.which("svrngs")
+    if found:
+        return found
+    for candidate in (Path.home() / ".local/bin/svrngs", Path("/usr/bin/svrngs")):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+class Unreadable(Exception):
+    """svrngs answered, or something stood in the way, but not as asked."""
+
+
+class Stopped(Exception):
+    """Nothing listens at the address svrngs last kept."""
+
+
+def address(root):
+    """(host, port) from svrngs's `api` file, which names the port it keeps."""
+    try:
+        line = (root / "api").read_text().strip()
+    except FileNotFoundError:
+        return None
+    match = re.fullmatch(r"http://127\.0\.0\.1:(\d{1,5})/?", line)
+    if not match or not 0 < int(match.group(1)) < 65536:
+        raise Unreadable(f"its api file says {text(line)!r}, which is not a local address")
+    return "127.0.0.1", int(match.group(1))
+
+
+def token(root):
+    try:
+        value = (root / "token").read_text().strip()
+    except OSError as e:
+        raise Unreadable(f"its token cannot be read: {e.strerror}") from None
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", value):
+        raise Unreadable("its token file holds no token")
+    return value
+
+
+def ask(at, secret, method, path, body=None, timeout=TIMEOUT):
+    """One request to svrngs's API. No Origin is sent: svrngs refuses a request
+    that carries one, as coming from a page (api.rs:199-210)."""
+    host, port = at
+    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    headers = {"Authorization": f"Bearer {secret}"}
+    payload = None
+    if body is not None:
+        payload = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    try:
+        conn.request(method, path, body=payload, headers=headers)
+        reply = conn.getresponse()
+        raw = reply.read(MAX_BODY + 1)
+    except ConnectionRefusedError:
+        raise Stopped() from None
+    except (OSError, http.client.HTTPException) as e:
+        raise Unreadable(f"{path} did not answer: {e}") from None
+    finally:
+        conn.close()
+    if len(raw) > MAX_BODY:
+        raise Unreadable(f"{path} answered more than {MAX_BODY // 1024} KiB")
+    try:
+        answer = json.loads(raw) if raw else {}
+    except ValueError:
+        raise Unreadable(f"{path} answered {reply.status} with no JSON") from None
+    if reply.status >= 400:
+        said = answer.get("error") if isinstance(answer, dict) else None
+        raise Unreadable(f"{path} answered {reply.status}: {text(said)}")
+    return answer
+
+
+def own_lends(root):
+    """This computer's lends, from their declarations, with the port each serves."""
+    folder = root / "lends"
+    found = []
+    if not folder.is_dir():
+        return found
+    for path in sorted(folder.glob("*.json")):
+        try:
+            declared = json.loads(path.read_text())
+        except (OSError, ValueError):
+            found.append({"name": text(path.stem), "port": None, "readable": False})
+            continue
+        found.append({"name": text(path.stem), "port": port_of(declared), "readable": True})
+    return rows(found)[0]
+
+
+def port_of(declared):
+    """The port in a lend's declaration, wherever its format keeps it."""
+    if not isinstance(declared, dict):
+        return None
+    for key in ("port", "source"):
+        value = declared.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, dict):
+            inner = port_of(value) or value.get("Port")
+            if isinstance(inner, int):
+                return inner
+    return None
+
+
+SS_LINE = re.compile(r"^\S+\s+\d+\s+\d+\s+(?P<local>\S+)\s+\S+\s*(?P<process>.*)$")
+SS_PROC = re.compile(r'\(\("(?P<name>[^"]+)",pid=(?P<pid>\d+)')
+
+
+def listeners(skip_ports):
+    """TCP listeners of this user's processes, on loopback or every address.
+    `ss -p` names a process only when it is this user's, so an unnamed row is
+    someone else's and is never offered."""
+    try:
+        out = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True, timeout=TIMEOUT).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    seen = {}
+    for line in out.splitlines():
+        match = SS_LINE.match(line.strip())
+        if not match:
+            continue
+        local = match.group("local")
+        host, _, port = local.rpartition(":")
+        if not port.isdigit():
+            continue
+        port = int(port)
+        if host not in ("127.0.0.1", "[::1]", "0.0.0.0", "*", "[::]") and not host.startswith("127."):
+            continue
+        proc = SS_PROC.search(match.group("process"))
+        if not proc:
+            continue
+        name = proc.group("name")
+        if port in skip_ports or port in DENY_PORTS or port in ROOM_PORTS or name in DENY_PROGRAMS:
+            continue
+        seen.setdefault(port, {"port": port, "program": text(name), "pid": int(proc.group("pid"))})
+    return rows(sorted(seen.values(), key=lambda r: r["port"]))[0]
+
+
+def state(full):
+    root = data_dir()
+    report = {"at": int(time.time() * 1000), "svrngs": None, "groups": [], "mine": [], "command": svrngs_command() is not None}
+    try:
+        at = address(root)
+        if at is None:
+            report["svrngs"] = "not-installed" if not report["command"] else "never-started"
+            return report
+        report["mine"] = own_lends(root)
+        secret = token(root)
+        held = ask(at, secret, "GET", "/v1/groups")
+        groups, over = rows(held.get("groups"))
+        report["groups"] = [
+            {"id": text(g.get("id")), "name": text(g.get("name")), "person": text(g.get("person")), "left": bool(g.get("left"))}
+            for g in groups
+            if isinstance(g, dict)
+        ]
+        report["groupsCut"] = over
+        report["svrngs"] = "running"
+        if full:
+            report["lends"] = {g["id"]: lends_of(at, secret, g["id"]) for g in report["groups"] if not g["left"]}
+            skip = {at[1]} | {m["port"] for m in report["mine"] if m["port"]}
+            report["listeners"] = listeners(skip)
+    except Stopped:
+        report["svrngs"] = "stopped"
+    except Unreadable as e:
+        report["svrngs"] = "unreadable"
+        report["reason"] = str(e)
+    return report
+
+
+def lends_of(at, secret, namespace):
+    try:
+        answer = ask(at, secret, "GET", f"/v1/lends?namespace={namespace}", timeout=LENDS_TIMEOUT)
+    except (Unreadable, Stopped) as e:
+        return {"error": text(str(e) or "svrngs stopped")}
+    lent, over = rows(answer.get("lent"))
+    return {
+        "lent": [
+            {
+                "person": text(l.get("person")),
+                "name": text(l.get("name")),
+                "kind": text(l.get("kind")),
+                "origin": text(l.get("origin")),
+                "using": l.get("using") if isinstance(l.get("using"), int) else None,
+                "limit": l.get("limit") if isinstance(l.get("limit"), int) else None,
+            }
+            for l in lent
+            if isinstance(l, dict)
+        ],
+        "cut": over,
+        "unanswered": [text(p.get("person")) for p in rows(answer.get("unanswered"))[0] if isinstance(p, dict)],
+    }
+
+
+def run_svrngs(args, stdin=""):
+    command = svrngs_command()
+    if command is None:
+        return {"ok": False, "said": "svrngs is not installed on this computer"}
+    try:
+        done = subprocess.run([command, *args], input=stdin, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "said": "svrngs did not finish within 30 seconds"}
+    # `share` asks for a password on stderr (cli.rs:1009-1033). The question
+    # is not part of what svrngs said, so it is taken out whole.
+    asked = re.sub(r"If .+? takes a password on each request, .+?\(Enter alone for none\):\s*", "", done.stderr, flags=re.S)
+    said = "\n".join(part.strip() for part in (done.stdout, asked) if part.strip())
+    return {"ok": done.returncode == 0, "code": done.returncode, "said": said[:4000]}
+
+
+def main(argv):
+    if not argv:
+        return {"ok": False, "said": __doc__.strip().splitlines()[0]}
+    verb, rest = argv[0], argv[1:]
+    if verb == "state":
+        return state("--full" in rest)
+    if verb == "share" and len(rest) >= 3 and rest[0].isdigit():
+        port, group, name = rest[:3]
+        args = ["share", port, "--group", group, "--name", name]
+        if "--program" in rest:
+            args += ["--program", rest[rest.index("--program") + 1]]
+        secret = sys.stdin.readline() if "--password-stdin" in rest else ""
+        return run_svrngs(args, stdin=secret.strip() + "\n")
+    if verb == "unshare" and rest:
+        args = ["unshare", rest[0]]
+        if "--group" in rest:
+            args += ["--group", rest[rest.index("--group") + 1]]
+        return run_svrngs(args)
+    if verb == "open":
+        body = {}
+        for flag, key in (("--lend", "lend"), ("--at", "at")):
+            if flag in rest:
+                body[key] = rest[rest.index(flag) + 1]
+        root = data_dir()
+        try:
+            at = address(root)
+            if at is None:
+                return {"ok": False, "said": "svrngs has never started here"}
+            answer = ask(at, token(root), "POST", "/v1/open", body)
+        except Stopped:
+            return {"ok": False, "said": "svrngs is not running"}
+        except Unreadable as e:
+            return {"ok": False, "said": str(e)}
+        url = answer.get("open")
+        if not isinstance(url, str) or not re.fullmatch(r"http://[a-z0-9.-]+\.localhost:\d+/\S*", url):
+            return {"ok": False, "said": "svrngs answered no address to open"}
+        return {"ok": True, "open": url}
+    if verb == "link" and rest:
+        return run_svrngs(["link", rest[0]])
+    return {"ok": False, "said": f"unknown verb or arguments: {text(' '.join(argv))}"}
+
+
+if __name__ == "__main__":
+    print(json.dumps(main(sys.argv[1:]), ensure_ascii=False))

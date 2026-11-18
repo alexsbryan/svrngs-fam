@@ -1,0 +1,15 @@
+{
+  "state.reading": "Reading svrngs…",
+  "state.running": "svrngs is running",
+  "state.stopped": "svrngs isn't running",
+  "state.never-started": "svrngs is installed but hasn't run here yet",
+  "state.not-installed": "svrngs isn't on this computer",
+  "state.unreadable": "svrngs's answer couldn't be read",
+  "lent.count": { "one": "You lend %1 thing from here", "other": "You lend %1 things from here" },
+  "panel.group": "%1, as %2",
+  "panel.friendLend": "%1's %2 (%3)",
+  "panel.groupUnread": "Couldn't ask this group: %1",
+  "panel.runningHere": "Running here",
+  "panel.nothingHere": "Nothing here to lend",
+  "panel.listener": "%1, port %2"
+}

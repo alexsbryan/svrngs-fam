@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "svrngs.fam",
+  "name": "svrngs",
+  "version": "0.0.1",
+  "author": "svrngs",
+  "license": "MIT",
+  "description": "Lend what runs on this computer to your people, use the models they lend, and invite someone, from the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "svrngs",
+    "description": "What you lend, what your people lend, and an invite.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
