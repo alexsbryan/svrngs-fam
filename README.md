@@ -1,50 +1,24 @@
 # svrngs.fam
 
-[svrngs](https://github.com/alexsbryan/svrngs) in your Omarchy bar.
+Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 
-svrngs is where you share what you run with the people you know: the app
-you're building, the films on your shelf, the graphics card in Sam's
-closet. svrngs.fam puts it one click from your desktop. A small icon in
-the bar, and a panel that says what's running here, what your people
-lend you, and who's in your groups.
+Click the people icon in the bar and you see three things: what's running
+on this computer that you could lend, the models your friends lend you,
+and your groups with what each person in them shares. Lend the app you're
+working on and your friends can open it as themselves. Copy the address of
+a friend's model and any program on your computer can use it, while their
+computer does the work. Start typing to find something across all your
+groups.
 
-## What it does
+Nothing is lent until you say yes twice, once to Lend and once to the
+question that follows. Your svrngs key stays on your computer and never
+reaches the clipboard. While the panel is closed the plugin runs nothing,
+apart from one quick check when svrngs restarts.
 
-- **Lend what you're building.** Start your app, open the panel, press
-  **Lend**. It says who will be able to open it, and lends it only when you
-  press again. Your friends open it as themselves; your app sees their name.
-  **Stop** takes it back.
-- **Use your people's models.** When a friend lends a model (a
-  llama-server, or a model they pay for), it shows up here. **Copy address**
-  gives you an OpenAI-compatible address for any program on this computer.
-  Your laptop runs nothing; their computer does the work.
-- **Open what your groups share.** Each group is one line. Open it to see
-  what each person lends, and press a name to open it in your browser,
-  already signed in. Something that isn't running right now is greyed out,
-  so you know before you click.
-- **Find anything.** With the panel open, just type: an app, a model, a
-  person or a group, across all your groups.
-- **Invite someone.** **Invite** makes a link to your group and copies it,
-  ready for the chat.
+## Install
 
-It works from the keyboard too: arrow keys move between buttons, Enter
-presses one, Escape closes the panel.
-
-## What it doesn't do
-
-- **Nothing lends on one click.** Every lend asks first.
-- **Nothing runs while the panel is closed.** The icon keeps itself up to
-  date from svrngs's own files. It passes Omarchy's own test for this.
-- **Your svrngs key stays put.** Only a small helper next to the panel ever
-  reads it, and it's never copied to the clipboard or written to a log.
-- **Friends' text is shown as text.** A name like `<b>Sam</b>` is shown
-  exactly like that.
-
-## Get it
-
-You need [Omarchy](https://omarchy.org). Install svrngs and the plugin
-from this repository's [latest release](https://github.com/alexsbryan/svrngs-fam/releases/latest),
-then start them as yourself:
+You need Omarchy. Download the two packages from the latest release, check
+them, and install them:
 
 ```
 mkdir -p ~/Downloads/svrngs && cd ~/Downloads/svrngs
@@ -52,63 +26,46 @@ U=https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0
 curl -fLO $U/SHA256SUMS -fLO $U/svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst -fLO $U/svrngs-fam-0.2.0-1-any.pkg.tar.zst
 sha256sum -c SHA256SUMS
 sudo pacman -U svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst svrngs-fam-0.2.0-1-any.pkg.tar.zst
-/usr/share/svrngs/setup-user            # starts svrngs
-/usr/share/svrngs-fam/setup-user        # puts the icon in your bar
 ```
 
-The packages aren't signed, so pacman installs them from files you've
-downloaded and checked, not straight from a link.
+Then, as yourself, start svrngs and put the icon in your bar:
 
-If you already run svrngs from its install line, `setup-user` moves that
-copy aside (it doesn't delete it) and your groups carry on as they were.
-From then on the package keeps svrngs, so it doesn't update itself: a
-new release is a new `pacman -U` from here, until svrngs reaches Omarchy's
-own package repository and arrives with `omarchy update`. (The AUR isn't
-taking new accounts, so it isn't there yet.)
+```
+/usr/share/svrngs/setup-user
+/usr/share/svrngs-fam/setup-user
+```
 
-New to svrngs? [Start a group](https://github.com/alexsbryan/svrngs#start-a-group)
-first, or ask a friend for a link. Lending and models are explained in
-svrngs's guide: [Lend](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/lend.md),
-[Models](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/models.md).
+If you already run svrngs from its install line, setup moves that copy
+aside rather than deleting it, and your groups carry on as before.
+
+The trade-off for now: these packages aren't signed and don't update
+themselves. A new release is another download from this page, until svrngs
+is in Omarchy's own package repository and arrives with your system
+updates.
+
+If you're new to svrngs, [start a group](https://github.com/alexsbryan/svrngs#start-a-group)
+or ask a friend for their link. svrngs's guide explains
+[lending](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/lend.md)
+and [models](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/models.md).
+
+## Remove
+
+```
+omarchy plugin disable svrngs.fam
+rm ~/.config/omarchy/plugins/svrngs.fam
+systemctl --user disable --now svrngs
+sudo pacman -R svrngs-fam svrngs-bin
+```
+
+Your groups stay in `~/.svrngs`. If setup moved an older svrngs aside, it's
+still in `~/.local/bin` with `.before-package` in its name.
+
+If you added only the plugin, with `omarchy plugin add`, then
+`omarchy plugin remove svrngs.fam` is all you need.
 
 ## Working on it
 
-Link your checkout as the plugin, and enable it:
-
-```
-ln -s "$PWD" ~/.config/omarchy/plugins/svrngs.fam
-omarchy plugin enable svrngs.fam --section right
-```
-
-Omarchy doesn't reload a linked plugin when you save, so run
-`omarchy restart shell` to see a change. `omarchy-shell svrngs.fam status`
-says what the widget currently holds.
-
-| File | What it does |
-|---|---|
-| `Panel.qml` | The icon and the panel |
-| `Service.qml` | Reads svrngs: once at start, when svrngs restarts, and while the panel is open |
-| `Model.js` | What the icon and the lists show, kept apart so it can be tested |
-| `bin/svrngs-fam` | The helper. Every read and action goes through it, and only it reads svrngs's key |
-| `i18n/en.json` | The words |
-| `packaging/arch/` | The two packages, and `bump`, which points `svrngs-bin` at a new svrngs release |
-| `omarchy/` | Drafts of `omarchy install service svrngs`, for proposing to Omarchy |
-
-`tests/run` runs every test in about a minute: the helper against a
-stand-in svrngs, the setup scripts in a scratch home, and the panel itself
-offscreen (that one needs Omarchy's shell). No test touches the svrngs on
-your computer.
-
-To package a release, build outside this folder, because Omarchy refuses a
-plugin folder that holds makepkg's links:
-
-```
-export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svrngs-build/src
-(cd packaging/arch/svrngs-bin && makepkg -f)
-(cd packaging/arch/svrngs-fam && makepkg -f)
-```
-
-## License
+See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 MIT, © 2026 Alex Bryan. svrngs itself is
 [AGPL-3.0](https://github.com/alexsbryan/svrngs/blob/main/LICENSE); this
