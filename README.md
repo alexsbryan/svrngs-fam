@@ -1,49 +1,104 @@
 # svrngs.fam
 
-svrngs in the Omarchy bar: what you lend from this computer, what your
-people lend you (their models among it), and an invite. The plan, the demo
-and the build order are in svrn-docs `rings/current/OMARCHY_PLUGIN.md`.
+[svrngs](https://github.com/alexsbryan/svrngs) in your Omarchy bar.
+
+svrngs is where you share what you run with the people you know: the app
+you're building, the films on your shelf, the graphics card in Sam's
+closet. svrngs.fam puts it one click from your desktop. A small icon in
+the bar, and a panel that says what's running here, what your people
+lend you, and who's in your groups.
+
+## What it does
+
+- **Lend what you're building.** Start your app, open the panel, press
+  **Lend**. It says who will be able to open it, and lends it only when you
+  press again. Your friends open it as themselves; your app sees their name.
+  **Stop** takes it back.
+- **Use your people's models.** When a friend lends a model (a
+  llama-server, or a model they pay for), it shows up here. **Copy address**
+  gives you an OpenAI-compatible address for any program on this computer.
+  Your laptop runs nothing; their computer does the work.
+- **Open what your groups share.** Each group is one line. Open it to see
+  what each person lends, and press a name to open it in your browser,
+  already signed in. Something that isn't running right now is greyed out,
+  so you know before you click.
+- **Find anything.** With the panel open, just type: an app, a model, a
+  person or a group, across all your groups.
+- **Invite someone.** **Invite** makes a link to your group and copies it,
+  ready for the chat.
+
+It works from the keyboard too: arrow keys move between buttons, Enter
+presses one, Escape closes the panel.
+
+## What it doesn't do
+
+- **Nothing lends on one click.** Every lend asks first.
+- **Nothing runs while the panel is closed.** The icon keeps itself up to
+  date from svrngs's own files. It passes Omarchy's own test for this.
+- **Your svrngs key stays put.** Only a small helper next to the panel ever
+  reads it, and it's never copied to the clipboard or written to a log.
+- **Friends' text is shown as text.** A name like `<b>Sam</b>` is shown
+  exactly like that.
+
+## Get it
+
+You need [Omarchy](https://omarchy.org) and svrngs. Both packages are on
+the AUR:
+
+```
+yay -S svrngs-fam                       # brings svrngs-bin with it
+/usr/share/svrngs/setup-user            # starts svrngs
+/usr/share/svrngs-fam/setup-user        # puts the icon in your bar
+```
+
+If you already run svrngs from its install line, `setup-user` moves that
+copy aside (it doesn't delete it) and your groups carry on as they were.
+From then on, svrngs updates with your system updates.
+
+New to svrngs? [Start a group](https://github.com/alexsbryan/svrngs#start-a-group)
+first, or ask a friend for a link. Lending and models are explained in
+svrngs's guide: [Lend](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/lend.md),
+[Models](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/models.md).
+
+## Working on it
+
+Link your checkout as the plugin, and enable it:
+
+```
+ln -s "$PWD" ~/.config/omarchy/plugins/svrngs.fam
+omarchy plugin enable svrngs.fam --section right
+```
+
+Omarchy doesn't reload a linked plugin when you save, so run
+`omarchy restart shell` to see a change. `omarchy-shell svrngs.fam status`
+says what the widget currently holds.
 
 | File | What it does |
 |---|---|
-| `manifest.json` | The plugin, `svrngs.fam`, a bar widget for the right section |
-| `Panel.qml` | The icon, its tooltip, and the panel: what runs here with **Lend** (always a second press) and what you lend with **Stop**; your people's models with **Copy address**; your groups with **Invite** and **Open** |
-| `Service.qml` | svrngs's state: one read at start, a file event at each svrngs start, the lends folder counted with no process, and a survey every 5 s only while the panel is open |
-| `Model.js` | What the icon shows for each answer |
-| `bin/svrngs-fam` | The helper. Every read and action goes through it; it alone reads svrngs's token |
-| `i18n/en.json` | The words, through Omarchy's `Translations` |
+| `Panel.qml` | The icon and the panel |
+| `Service.qml` | Reads svrngs: once at start, when svrngs restarts, and while the panel is open |
+| `Model.js` | What the icon and the lists show, kept apart so it can be tested |
+| `bin/svrngs-fam` | The helper. Every read and action goes through it, and only it reads svrngs's key |
+| `i18n/en.json` | The words |
+| `packaging/arch/` | The two AUR packages, and `bump`, which points `svrngs-bin` at a new svrngs release |
+| `omarchy/` | Drafts of `omarchy install service svrngs`, for proposing to Omarchy |
 
-## Try it
+`tests/run` runs every test in about a minute: the helper against a
+stand-in svrngs, the setup scripts in a scratch home, and the panel itself
+offscreen (that one needs Omarchy's shell). No test touches the svrngs on
+your computer.
 
-    ln -s "$PWD" ~/.config/omarchy/plugins/svrngs.fam
-    omarchy plugin enable svrngs.fam --section right
+To package a release, build outside this folder, because Omarchy refuses a
+plugin folder that holds makepkg's links:
 
-Omarchy's shell does not reload a linked plugin on save (its watcher does
-not follow the link): `omarchy restart shell` loads a change.
-`omarchy-shell svrngs.fam status` says what the widget holds.
+```
+export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svrngs-build/src
+(cd packaging/arch/svrngs-bin && makepkg -f)
+(cd packaging/arch/svrngs-fam && makepkg -f)
+```
 
-## Packages
+## License
 
-Two, in `packaging/arch/`, each published to the AUR: `svrngs-bin`
-(svrngs itself, from its GitHub Release; svrn-docs
-`rings/current/SVRNGS_PACKAGE.md`) and `svrngs-fam` (this plugin, from its
-tag here, which needs it). While working on the plugin, link it as above;
-a package is for a tagged release.
-
-    packaging/arch/bump 1.11.0             # svrngs-bin to a release, by its SHA256SUMS
-    # Build outside this folder: it is the plugin, and Omarchy refuses a
-    # plugin folder holding makepkg's links.
-    export BUILDDIR=/tmp/svrngs-build PKGDEST=/tmp/svrngs-build/out SRCDEST=/tmp/svrngs-build/src
-    (cd packaging/arch/svrngs-bin && makepkg -f)
-    (cd packaging/arch/svrngs-fam && makepkg -f)
-    sudo pacman -U /tmp/svrngs-build/out/*.pkg.tar.zst
-    /usr/share/svrngs/setup-user           # as yourself: the packaged svrngs runs, an
-                                           # install-line one moved aside; ~/.svrngs kept
-    /usr/share/svrngs-fam/setup-user       # as yourself: the icon in the bar
-
-## Tests
-
-    tests/run              # all of them, about a minute
-
-The idle bar is held to Omarchy's own `test/shell.d/shell-idle-spawn-test.sh`
-with the plugin enabled (`runs/2026-11-17-s1.md` says how it was run).
+MIT, © 2026 Alex Bryan. svrngs itself is
+[AGPL-3.0](https://github.com/alexsbryan/svrngs/blob/main/LICENSE); this
+plugin only talks to it, through its command and its local API.
