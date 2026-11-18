@@ -17,6 +17,7 @@ Verbs:
   open [--lend <label>] [--at <path>]
                                   opens it in the browser, signed in
   link <group>                    makes a new invite link and copies it
+  start                           starts svrngs again, as svrngs restart does
   get [--link <invite link>]      installs svrngs with its own installer, once
                                   the installer's signature verifies against
                                   the svrngs release key in ../keys
@@ -516,7 +517,7 @@ def signed_by_release_key(data, signature, home):
 
 def get_svrngs(link):
     """svrngs installed by its own installer from its latest release, run
-    only once its signature verifies: for this person alone, no sudo, then
+    only once its signature verifies: for this person alone, without root, then
     their home page opens (svrngs web/install.sh)."""
     if link is not None and not LINK.fullmatch(link):
         return {"ok": False, "said": "That doesn't look like a svrngs invite link. Paste the whole link your friend sent."}
@@ -578,6 +579,10 @@ def main(argv):
         return open_in_browser(body)
     if verb == "link" and rest:
         return invite(rest[0])
+    # svrngs knows what keeps it running (its install line's service, or a
+    # package's): `svrngs restart` asks that, and starts it when it's stopped.
+    if verb == "start":
+        return run_svrngs(["restart"])
     if verb == "get":
         link = rest[rest.index("--link") + 1] if "--link" in rest and rest.index("--link") + 1 < len(rest) else None
         return get_svrngs(link.strip() if link else None)

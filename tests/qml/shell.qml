@@ -300,6 +300,17 @@ ShellRoot {
 
     function afterGet() {
       check("a release that can't be read is said, and nothing is installed", fam.said.indexOf("couldn't be read") >= 0 && !fam.saidOk, true)
+
+      console.log("svrngs stopped: Start svrngs")
+      show({ svrngs: "stopped" })
+      check("its one stop is Start", JSON.stringify(barPanel.stops), JSON.stringify(["start"]))
+      barPanel.activate("start")
+      check("Start asks the helper, which asks svrngs", JSON.stringify(fam.lastAsked), JSON.stringify(["start"]))
+      settle.then = harness.finish2
+      settle.start()
+    }
+
+    function finish2() {
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
     }
 

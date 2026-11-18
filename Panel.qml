@@ -205,7 +205,7 @@ Panel {
   }
 
   function startSvrngs() {
-    Quickshell.execDetached(["systemctl", "--user", "start", "svrngs"])
+    fam.act("start", ["start"])
   }
 
   function summary(view) {
@@ -415,6 +415,7 @@ Panel {
             Note { text: strings.t("help." + fam.state) }
             Act {
               visible: fam.state === "stopped"
+              doing: "start"
               words: strings.t("action.start")
               stop: "start"
               onClicked: root.startSvrngs()

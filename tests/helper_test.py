@@ -45,6 +45,7 @@ case "$1" in
     echo "svrngs doesn't know $8, so your friends can reach every part of it that its own sign-in allows."
     echo "\`svrngs unshare $6\` stops lending it." ;;
   unshare) echo "You no longer lend $2." ;;
+  restart) echo "svrngs is restarting. Your home page comes back in a moment." ;;
   link) cat "$HOME/link-said" ;;
 esac
 """
@@ -316,6 +317,8 @@ check("svrngs's words, without the password question or the terminal tips", got[
       "svrngs doesn't know puma, so your friends can reach every part of it that its own sign-in allows.")
 got, _ = run(home, "unshare", "garden")
 check("stopped", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["unshare", "garden"]))
+got, _ = run(home, "start")
+check("start asks svrngs to restart itself", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["restart"]))
 
 print("ALL OK" if not failures else f"{len(failures)} FAILED")
 SCRATCH.cleanup()
