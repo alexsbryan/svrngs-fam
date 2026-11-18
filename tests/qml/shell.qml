@@ -38,8 +38,9 @@ ShellRoot {
       mine: [{ name: "notes", port: 3001, groups: ["g1"] }],
       lends: { g1: { lent: [
         { person: "Fedora", name: "deepseek-flash", kind: "spot", origin: "http://abc123.localhost:41097/" },
-        { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/" }
-      ] } },
+        { person: "Fedora", name: "garden", kind: "puma", origin: "http://fff999.localhost:41097/", answering: false },
+        { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
+      ], unanswered: ["Bo"] } },
       listeners: [{ port: 3000, program: "puma", name: "garden", pid: 1 }]
     })
     readonly property string group: "󰡉"
@@ -114,9 +115,12 @@ ShellRoot {
       show(running)
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
       check("what is offered", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden" }]))
-      check("what is lent, with its groups' names", JSON.stringify(barPanel.lent), JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"] }]))
+      check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
+            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
-      check("a group's lends from others, not yours", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label })), JSON.stringify(["Fedora:abc123"]))
+      check("a group's lends from others, not yours, each running or not", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label + ":" + l.answering })),
+            JSON.stringify(["Fedora:abc123:true", "Fedora:fff999:false"]))
+      check("whose computer did not answer is named", JSON.stringify(Model.unanswered(fam.answer, barPanel.groups[0])), JSON.stringify(["Bo"]))
 
       console.log("nothing runs while the panel is closed")
       readsWhenClosed = fam.reads
@@ -201,7 +205,7 @@ ShellRoot {
       barPanel.lending = null
       barPanel.inviting = ""
       fam.models = [{ person: "Fedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
-      check("a stop for every button, in the order drawn", JSON.stringify(barPanel.stops), JSON.stringify(
+      check("a stop for every button, in the order drawn, none for a lend that is not running", JSON.stringify(barPanel.stops), JSON.stringify(
         ["stop:notes", "lend:3000", "copy:0", "invite:g1", "home:g1", "open:abc123", "invite:g2", "home:g2"]))
       check("no cursor until a key moves it", barPanel.currentStop, "")
       barPanel.moveCursor(0, 1)

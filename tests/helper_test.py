@@ -233,8 +233,9 @@ fake.lends = {"lent": [
     {"person": "Fedora", "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
     {"person": "LittleMac", "name": "mine", "kind": "llama-server", "origin": f"http://mine1.localhost:{fake.port}/"},
     {"person": "Mallory", "name": "elsewhere", "kind": "spot", "origin": "http://model2.localhost:1/"},
+    {"person": "Fedora", "name": "asleep", "kind": "spot", "origin": f"http://model3.localhost:{fake.port}/", "answering": False},
 ]}
-fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"]}
+fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"], "model3": ["y"]}
 got, _ = run(home, "models")
 check("one model found", [(m["person"], m["name"], m["models"]) for m in got["models"]], [("Fedora", "coder", ["qwen3-coder"])])
 check("of two friends' lends asked at svrngs's own address", got["asked"], 2)
@@ -242,6 +243,9 @@ check("its address is the lend's, ending in v1", got["models"][0]["address"] if 
 asked = [s["headers"].get("Host", "").split(".")[0] for s in fake.seen if s["path"] == "/v1/models"]
 check("your own lend is not asked", "mine1" in asked, False)
 check("a lend not at svrngs's own address is never sent the token", "model2" in asked, False)
+check("a lend its lender says is not running is not asked", "model3" in asked, False)
+full = state(home, "--full")["lends"]["a" * 64]["lent"]
+check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, False])
 fake.close()
 
 home = case("open: in the browser, signed in")

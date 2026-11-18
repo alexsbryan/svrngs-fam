@@ -55,7 +55,7 @@ Panel {
     groups.forEach(function(g) {
       out.push("invite:" + g.id, "home:" + g.id)
       if (inviting === g.id) out.push("invite:confirm", "invite:cancel")
-      Model.friendsLends(fam.answer, g).forEach(function(l) { if (l.label !== "") out.push("open:" + l.label) })
+      Model.friendsLends(fam.answer, g).forEach(function(l) { if (l.label !== "" && l.answering) out.push("open:" + l.label) })
     })
     return out
   }
@@ -299,7 +299,8 @@ Panel {
               Line {
                 required property var modelData
                 words: modelData.name + (modelData.port ? " · port " + modelData.port : "")
-                note: modelData.groups.length > 0 ? strings.t("here.lentTo").arg(modelData.groups.join(", ")) : strings.t("here.lentNowhere")
+                note: !modelData.answering ? strings.t("here.notRunning")
+                  : modelData.groups.length > 0 ? strings.t("here.lentTo").arg(modelData.groups.join(", ")) : strings.t("here.lentNowhere")
                 Act {
                   doing: "stop:" + modelData.name
                   stop: doing
@@ -462,12 +463,22 @@ Panel {
                 }
 
                 Repeater {
+                  model: Model.unanswered(fam.answer, groupColumn.modelData)
+                  Note {
+                    required property var modelData
+                    text: strings.t("groups.unanswered").arg(modelData)
+                  }
+                }
+
+                Repeater {
                   model: Model.friendsLends(fam.answer, groupColumn.modelData)
                   Line {
                     required property var modelData
                     words: strings.t("groups.friendLend").arg(modelData.person).arg(modelData.name)
+                    note: modelData.answering ? "" : strings.t("groups.notRunning")
                     Act {
                       visible: modelData.label !== ""
+                      enabled: fam.doing === "" && modelData.answering
                       doing: "open:" + modelData.label
                       stop: doing
                       words: strings.t("action.open")

@@ -65,11 +65,20 @@ function lent(answer) {
   if (!running(answer)) return []
   var names = {}
   groups(answer).forEach(function(g) { names[g.id] = g.name })
+  // Whether each is running, as svrngs lists it to its own groups.
+  var answering = {}
+  groups(answer).forEach(function(g) {
+    var lends = answer.lends ? answer.lends[g.id] : null
+    ;((lends && lends.lent) || []).forEach(function(l) {
+      if (l.person === g.person && l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
+    })
+  })
   return (answer.mine || []).map(function(m) {
     return {
       name: m.name,
       port: m.port,
-      groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" })
+      groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" }),
+      answering: answering[m.name] === false ? false : true
     }
   })
 }
@@ -86,8 +95,15 @@ function friendsLends(answer, group) {
   var lends = running(answer) && answer.lends ? answer.lends[group.id] : null
   if (!lends || !lends.lent) return []
   return lends.lent.filter(function(l) { return l.person !== group.person }).map(function(l) {
-    return { person: l.person, name: l.name, label: labelOf(l.origin) }
+    return { person: l.person, name: l.name, label: labelOf(l.origin), answering: l.answering !== false }
   })
+}
+
+// The people of a group whose computer did not answer svrngs just now:
+// their lends are not listed at all, so they are named instead.
+function unanswered(answer, group) {
+  var lends = running(answer) && answer.lends ? answer.lends[group.id] : null
+  return lends && lends.unanswered ? lends.unanswered : []
 }
 
 // The label `svrngs open` takes for a lend: its address's first name.
