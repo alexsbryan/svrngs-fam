@@ -1,3 +1,4 @@
+# Maintainer: Alex Bryan
 # svrngs from its GitHub Release: the same files the group page's get/
 # serves (svrn-docs rings/current/SVRNGS_PACKAGE.md). `../bump <version>`
 # sets pkgver and the release's sums. The package owns /usr/bin/svrngs and
@@ -12,6 +13,7 @@ license=('AGPL-3.0-or-later')
 provides=('svrngs')
 conflicts=('svrngs')
 options=('!strip' '!debug')
+install=svrngs-bin.install
 _release="https://github.com/alexsbryan/svrngs/releases/download/v$pkgver"
 source=(svrngs.service svrngs.desktop updated-by setup-user)
 source_x86_64=("svrngs-$pkgver-linux-x86_64.tar.gz::$_release/svrngs-linux-x86_64.tar.gz")

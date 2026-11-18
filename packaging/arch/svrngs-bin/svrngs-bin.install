@@ -1,0 +1,8 @@
+post_install() {
+  echo "svrngs: as yourself, run /usr/share/svrngs/setup-user to start it."
+  echo "  An install made by svrngs's own install line is moved aside, and your groups in ~/.svrngs are kept."
+}
+
+post_upgrade() {
+  echo "svrngs: run 'systemctl --user restart svrngs' to use this version."
+}

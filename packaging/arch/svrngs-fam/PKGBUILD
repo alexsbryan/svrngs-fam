@@ -1,16 +1,19 @@
-# svrngs.fam, the Omarchy bar plugin for svrngs, packaged from this
-# repository's checkout: `makepkg` here builds the commit checked out.
+# Maintainer: Alex Bryan
+# svrngs.fam, svrngs in the Omarchy bar, from its tagged release.
 pkgname=svrngs-fam
 pkgver=0.2.0
 pkgrel=1
-pkgdesc="svrngs in the Omarchy bar: lend what you're building, use your people's models, invite"
+pkgdesc="Omarchy bar plugin for svrngs: lend what you're building, use your people's models, invite"
 arch=('any')
-url="https://svrnme.sh"
+url="https://github.com/alexsbryan/svrngs-fam"
 license=('MIT')
-depends=('omarchy' 'svrngs' 'python' 'iproute2' 'wl-clipboard')
+depends=('svrngs' 'python' 'iproute2' 'wl-clipboard')
+install=svrngs-fam.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
 
 package() {
-  local src="$startdir/../../.."
+  local src="$srcdir/$pkgname-$pkgver"
   local dest="$pkgdir/usr/share/svrngs-fam"
   install -Dm644 "$src/manifest.json" "$dest/manifest.json"
   install -Dm644 -t "$dest" "$src/Panel.qml" "$src/Service.qml" "$src/Model.js"

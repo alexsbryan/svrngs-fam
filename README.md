@@ -24,9 +24,11 @@ not follow the link): `omarchy restart shell` loads a change.
 
 ## Packages
 
-Two, in `packaging/arch/`: `svrngs-bin` (svrngs itself, from its GitHub
-Release; svrn-docs `rings/current/SVRNGS_PACKAGE.md`) and `svrngs-fam` (this
-plugin, which needs it).
+Two, in `packaging/arch/`, each published to the AUR: `svrngs-bin`
+(svrngs itself, from its GitHub Release; svrn-docs
+`rings/current/SVRNGS_PACKAGE.md`) and `svrngs-fam` (this plugin, from its
+tag here, which needs it). While working on the plugin, link it as above;
+a package is for a tagged release.
 
     packaging/arch/bump 1.11.0             # svrngs-bin to a release, by its SHA256SUMS
     # Build outside this folder: it is the plugin, and Omarchy refuses a
