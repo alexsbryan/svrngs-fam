@@ -22,10 +22,15 @@ Omarchy's shell does not reload a linked plugin on save (its watcher does
 not follow the link): `omarchy restart shell` loads a change.
 `omarchy-shell svrngs.fam status` says what the widget holds.
 
+## Package
+
+    cd packaging/arch && makepkg -f
+    sudo pacman -U svrngs-fam-*.pkg.tar.zst
+    /usr/share/svrngs-fam/setup-user   # as yourself: links it and puts it in the bar
+
 ## Tests
 
-    tests/helper_test.py   # the helper against a fake svrngs
-    tests/qml_logic.py     # the widget offscreen; needs quickshell and Omarchy's shell
+    tests/run              # all of them, about a minute
 
 The idle bar is held to Omarchy's own `test/shell.d/shell-idle-spawn-test.sh`
 with the plugin enabled (`runs/2026-11-17-s1.md` says how it was run).
