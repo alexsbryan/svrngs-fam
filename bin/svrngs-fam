@@ -66,14 +66,17 @@ def data_dir():
 
 
 def svrngs_command():
-    """The svrngs binary: on PATH, else where its install line puts it."""
+    """The svrngs binary: SVRNGS_FAM_SVRNGS when set (empty for none, as the
+    tests set it, so no test reaches a real svrngs), else on PATH, else where
+    its install line puts it."""
+    if "SVRNGS_FAM_SVRNGS" in os.environ:
+        named = os.environ["SVRNGS_FAM_SVRNGS"]
+        return named if named and os.access(named, os.X_OK) else None
     found = shutil.which("svrngs")
     if found:
         return found
-    for candidate in (Path.home() / ".local/bin/svrngs", Path("/usr/bin/svrngs")):
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return None
+    candidate = Path.home() / ".local/bin/svrngs"
+    return str(candidate) if candidate.is_file() and os.access(candidate, os.X_OK) else None
 
 
 class Unreadable(Exception):
@@ -398,7 +401,7 @@ def models():
         for label, ids in zip(candidates, pool.map(probe, candidates)):
             if ids:
                 found.append({**candidates[label], "models": ids})
-    return {"ok": True, "models": found}
+    return {"ok": True, "models": found, "asked": len(candidates)}
 
 
 def open_in_browser(body):

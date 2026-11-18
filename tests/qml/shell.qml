@@ -196,7 +196,39 @@ ShellRoot {
     }
 
     function finish() {
+      console.log("the keyboard")
+      show(running)
+      barPanel.lending = null
+      barPanel.inviting = ""
+      fam.models = [{ person: "Fedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
+      check("a stop for every button, in the order drawn", JSON.stringify(barPanel.stops), JSON.stringify(
+        ["stop:notes", "lend:3000", "copy:0", "invite:g1", "home:g1", "open:abc123", "invite:g2", "home:g2"]))
+      check("no cursor until a key moves it", barPanel.currentStop, "")
+      barPanel.moveCursor(0, 1)
+      check("the first key puts it on the first button", barPanel.currentStop, "stop:notes")
+      barPanel.moveCursor(0, 1)
+      check("down moves it", barPanel.currentStop, "lend:3000")
+      barPanel.activate(barPanel.currentStop)
+      check("Enter on Lend asks first", (barPanel.lending || {}).port, 3000)
+      check("and lends nothing", fam.doing, "")
+      keys.start()
+    }
+
+    function keysAfter() {
+      check("the cursor moves to the second press", barPanel.currentStop, "lend:confirm")
+      barPanel.moveCursor(0, 1)
+      barPanel.activate(barPanel.currentStop)
+      check("Cancel by keyboard lends nothing", [barPanel.lending, fam.doing].join("|"), "|")
+      barPanel.moveCursor(0, -99)
+      barPanel.moveCursor(0, 99)
+      check("the cursor stays within the buttons", barPanel.currentStop, "home:g2")
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+    }
+
+    Timer {
+      id: keys
+      interval: 100
+      onTriggered: harness.keysAfter()
     }
 
     // Waits for the action in flight to end, then goes on.
@@ -206,7 +238,7 @@ ShellRoot {
       interval: 100
       repeat: true
       onTriggered: {
-        if (harness.fam.doing !== "") return
+        if (harness.fam.doing !== "" || harness.fam.reading) return
         stop()
         then()
       }

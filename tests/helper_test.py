@@ -69,7 +69,9 @@ def run(home, *args, installed=True, data=None):
     for name, body in STUBS.items():
         (stubs / name).write_text(body)
         (stubs / name).chmod(0o755)
-    env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin"}
+    # The command is named, or named as none: never the svrngs installed here.
+    env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin",
+           "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else ""}
     if data is not None:
         env["SVRNGS_DIR"] = str(data)
     done = subprocess.run([str(HELPER), *args], capture_output=True, text=True, env=env, timeout=30)
@@ -235,6 +237,7 @@ fake.lends = {"lent": [
 fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"]}
 got, _ = run(home, "models")
 check("one model found", [(m["person"], m["name"], m["models"]) for m in got["models"]], [("Fedora", "coder", ["qwen3-coder"])])
+check("of two friends' lends asked at svrngs's own address", got["asked"], 2)
 check("its address is the lend's, ending in v1", got["models"][0]["address"] if got["models"] else None, f"http://model1.localhost:{fake.port}/v1")
 asked = [s["headers"].get("Host", "").split(".")[0] for s in fake.seen if s["path"] == "/v1/models"]
 check("your own lend is not asked", "mine1" in asked, False)

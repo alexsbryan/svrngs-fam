@@ -42,6 +42,25 @@ Panel {
   // The group whose new invite link waits for its second press.
   property string inviting: ""
 
+  // The keyboard's cursor: one stop per button, in the order they are drawn.
+  property bool cursorActive: false
+  property int cursor: 0
+  readonly property var stops: {
+    var out = []
+    if (!isRunning) return fam.state === "stopped" ? ["start"] : []
+    lent.forEach(function(l) { out.push("stop:" + l.name) })
+    offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
+    if (lending) out.push("lend:confirm", "lend:cancel")
+    fam.models.forEach(function(m, i) { out.push("copy:" + i) })
+    groups.forEach(function(g) {
+      out.push("invite:" + g.id, "home:" + g.id)
+      if (inviting === g.id) out.push("invite:confirm", "invite:cancel")
+      Model.friendsLends(fam.answer, g).forEach(function(l) { if (l.label !== "") out.push("open:" + l.label) })
+    })
+    return out
+  }
+  readonly property string currentStop: cursorActive && stops.length > 0 ? stops[Math.min(cursor, stops.length - 1)] : ""
+
   property alias service: fam
 
   Commons.Translations {
@@ -54,7 +73,37 @@ Panel {
     wanted: root.opened
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = "" }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; cursorActive = false; cursor = 0 }
+
+  function moveCursor(dx, dy) {
+    if (!cursorActive) { cursorActive = true; cursor = 0; return }
+    cursor = Math.max(0, Math.min(stops.length - 1, cursor + (dy !== 0 ? dy : dx)))
+  }
+
+  // Put the cursor on `stop` once it is drawn: a first press moves it to
+  // its own second press.
+  function cursorTo(stop) {
+    Qt.callLater(function() { var at = root.stops.indexOf(stop); if (at >= 0) root.cursor = at })
+  }
+
+  function activate(stop) {
+    var kind = stop.split(":")[0]
+    var rest = stop.slice(kind.length + 1)
+    if (kind === "start") startSvrngs()
+    else if (kind === "stop") root.stop(rest)
+    else if (stop === "lend:confirm") lend()
+    else if (stop === "lend:cancel") lending = null
+    else if (kind === "lend") {
+      var offer = offers.filter(function(o) { return String(o.port) === rest })[0]
+      if (offer) { askLend(offer); cursorTo("lend:confirm") }
+    }
+    else if (kind === "copy") copyAddress(fam.models[Number(rest)])
+    else if (stop === "invite:confirm") invite(inviting)
+    else if (stop === "invite:cancel") inviting = ""
+    else if (kind === "invite") { lending = null; inviting = rest; cursorTo("invite:confirm") }
+    else if (kind === "home") openLend("")
+    else if (kind === "open") openLend(rest)
+  }
 
   function groupName(id) {
     for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return groups[i].name
@@ -168,6 +217,8 @@ Panel {
   component Act: Button {
     property string doing: ""
     property string words: ""
+    property string stop: ""
+    hasCursor: stop !== "" && root.currentStop === stop
     bordered: true
     enabled: fam.doing === ""
     text: doing !== "" && fam.doing === doing ? strings.t("working") : words
@@ -189,6 +240,8 @@ Panel {
       implicitHeight: column.implicitHeight
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
+      onActivateRequested: if (root.currentStop !== "") root.activate(root.currentStop)
 
       Flickable {
         id: flick
@@ -228,6 +281,7 @@ Panel {
             Act {
               visible: fam.state === "stopped"
               words: strings.t("action.start")
+              stop: "start"
               onClicked: root.startSvrngs()
             }
           }
@@ -248,6 +302,7 @@ Panel {
                 note: modelData.groups.length > 0 ? strings.t("here.lentTo").arg(modelData.groups.join(", ")) : strings.t("here.lentNowhere")
                 Act {
                   doing: "stop:" + modelData.name
+                  stop: doing
                   words: strings.t("action.stop")
                   onClicked: root.stop(modelData.name)
                 }
@@ -263,6 +318,7 @@ Panel {
                 note: strings.t("here.offer").arg(modelData.program).arg(modelData.port)
                 Act {
                   words: strings.t("action.lend")
+                  stop: "lend:" + modelData.port
                   onClicked: root.askLend(modelData)
                 }
               }
@@ -310,11 +366,12 @@ Panel {
                 spacing: Style.space(8)
                 Act {
                   doing: "lend"
+                  stop: "lend:confirm"
                   words: strings.t("action.lend")
                   enabled: fam.doing === "" && Model.cleanName(root.lendName) !== ""
                   onClicked: root.lend()
                 }
-                Act { words: strings.t("action.cancel"); onClicked: root.lending = null }
+                Act { words: strings.t("action.cancel"); stop: "lend:cancel"; onClicked: root.lending = null }
               }
             }
 
@@ -337,12 +394,15 @@ Panel {
             Repeater {
               model: fam.models
               Line {
+                id: modelLine
                 required property var modelData
+                required property int index
                 words: strings.t("models.row").arg(modelData.name).arg(modelData.person)
                 // The model's own names, when they say more than the lend's.
                 note: modelData.models.join(", ") === modelData.name ? "" : modelData.models.join(", ")
                 Act {
                   words: strings.t("action.copyAddress")
+                  stop: "copy:" + modelLine.index
                   onClicked: root.copyAddress(modelData)
                 }
               }
@@ -350,7 +410,8 @@ Panel {
 
             Note {
               visible: fam.models.length === 0
-              text: fam.modelsAsked ? strings.t("models.none") : strings.t("models.asking")
+              text: !fam.modelsAsked ? strings.t("models.asking")
+                : fam.lendsAsked > 0 ? strings.t("models.quiet") : strings.t("models.none")
             }
           }
 
@@ -377,10 +438,12 @@ Panel {
                   Act {
                     doing: "invite:" + groupColumn.modelData.id
                     words: strings.t("action.invite")
+                    stop: doing
                     onClicked: { root.lending = null; root.inviting = groupColumn.modelData.id }
                   }
                   Act {
                     doing: "open:"
+                    stop: "home:" + groupColumn.modelData.id
                     words: strings.t("action.open")
                     onClicked: root.openLend("")
                   }
@@ -393,8 +456,8 @@ Panel {
                   Note { text: strings.t("invite.question").arg(groupColumn.modelData.name) }
                   Row {
                     spacing: Style.space(8)
-                    Act { words: strings.t("action.makeLink"); onClicked: root.invite(groupColumn.modelData.id) }
-                    Act { words: strings.t("action.cancel"); onClicked: root.inviting = "" }
+                    Act { words: strings.t("action.makeLink"); stop: "invite:confirm"; onClicked: root.invite(groupColumn.modelData.id) }
+                    Act { words: strings.t("action.cancel"); stop: "invite:cancel"; onClicked: root.inviting = "" }
                   }
                 }
 
@@ -406,6 +469,7 @@ Panel {
                     Act {
                       visible: modelData.label !== ""
                       doing: "open:" + modelData.label
+                      stop: doing
                       words: strings.t("action.open")
                       onClicked: root.openLend(modelData.label)
                     }

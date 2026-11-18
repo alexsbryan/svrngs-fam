@@ -55,6 +55,8 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-qml-") as directory:
         "HOME": str(home),
         "SVRNGS_DIR": str(home / ".svrngs"),
         "PATH": "/usr/bin:/bin",
+        # No svrngs, whatever this computer has installed.
+        "SVRNGS_FAM_SVRNGS": "",
         "XDG_RUNTIME_DIR": str(runtime),
         "QT_QPA_PLATFORM": "offscreen",
     }

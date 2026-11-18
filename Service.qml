@@ -26,6 +26,8 @@ Item {
 
   property var answer: null
   property int reads: 0
+  // A read in flight or waiting, for the logic test to wait on.
+  readonly property bool reading: helper.running || _again
   readonly property int lentHere: lendFiles.count
   readonly property string state: Model.stateOf(answer)
   readonly property var look: Model.look(answer)
@@ -38,6 +40,8 @@ Item {
   // again only when which lends there are changes.
   property var models: []
   property bool modelsAsked: false
+  // How many friends' lends were asked, answering or not.
+  property int lendsAsked: 0
   property string _modelsKey: ""
 
   // The action in flight ("" when none), and what the last one said.
@@ -171,6 +175,7 @@ Item {
       var reply
       try { reply = JSON.parse(String(modelsOut.text)) } catch (e) { reply = null }
       root.models = reply && reply.ok && Array.isArray(reply.models) ? reply.models : []
+      root.lendsAsked = reply && reply.ok ? Number(reply.asked) || 0 : 0
       root.modelsAsked = true
     }
   }
