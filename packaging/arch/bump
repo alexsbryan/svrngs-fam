@@ -48,7 +48,8 @@ def main(argv):
     s = re.sub(r"(?m)^pkgver=.*$", f"pkgver={version}", s)
     s = re.sub(r"(?m)^pkgrel=.*$", "pkgrel=1", s)
     for arch, name in PLATFORMS.items():
-        s = re.sub(rf"(?m)^sha256sums_{arch}=\(.*\)$", f"sha256sums_{arch}=('{released[name]}')", s)
+        # The tarball's sum, and SKIP for its signature, which the key checks.
+        s = re.sub(rf"(?m)^sha256sums_{arch}=\(.*\)$", f"sha256sums_{arch}=('{released[name]}' 'SKIP')", s)
     local = re.search(r"(?m)^source=\((.*)\)$", s).group(1).split()
     own = " ".join(f"'{hashlib.sha256((HERE / f).read_bytes()).hexdigest()}'" for f in local)
     s = re.sub(r"(?m)^sha256sums=\(.*\)$", f"sha256sums=({own})", s)

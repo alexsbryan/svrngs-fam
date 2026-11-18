@@ -108,8 +108,8 @@ with tempfile.TemporaryDirectory() as scratch:
     s = pkgbuild.read_text()
     check("succeeds", done.returncode, 0)
     check("the version", re.search(r"(?m)^pkgver=(.*)$", s).group(1), "1.11.0")
-    check("x86_64's sum from the release", re.search(r"(?m)^sha256sums_x86_64=\('(\w+)'\)$", s).group(1), x)
-    check("aarch64's sum from the release", re.search(r"(?m)^sha256sums_aarch64=\('(\w+)'\)$", s).group(1), a)
+    check("x86_64's sum from the release, its signature left to the key", re.search(r"(?m)^sha256sums_x86_64=\('(\w+)' 'SKIP'\)$", s).group(1), x)
+    check("aarch64's sum from the release, its signature left to the key", re.search(r"(?m)^sha256sums_aarch64=\('(\w+)' 'SKIP'\)$", s).group(1), a)
     own = re.findall(r"'(\w+)'", re.search(r"(?m)^sha256sums=\((.*)\)$", s).group(1))
     check("the package's own files' sums from their bytes, an edit included",
           own[-1], hashlib.sha256(b"#!/bin/bash\n# changed\n").hexdigest())

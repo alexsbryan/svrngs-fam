@@ -26,6 +26,8 @@ computer.
 
 `packaging/arch/` holds the two packages. `packaging/arch/bump <version>`
 points `svrngs-bin` at a new svrngs release, using that release's checksums.
+makepkg checks each svrngs download against the svrngs release key, so
+import it once with `gpg --import packaging/arch/svrngs-bin/keys/pgp/*.asc`.
 Build outside this folder, because Omarchy refuses a plugin folder that
 holds makepkg's links:
 
