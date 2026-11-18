@@ -56,14 +56,35 @@ and [models](https://github.com/alexsbryan/svrngs/blob/main/docs/guide/models.md
 
 ## Remove
 
-`omarchy plugin remove svrngs.fam` removes the plugin. svrngs itself stays,
-with your groups.
+To remove the plugin and keep svrngs:
 
-To remove svrngs too, stop it with `systemctl --user disable --now svrngs`,
-then delete what installed it: `~/.local/bin/svrngs` if you used Get svrngs
-or svrngs's install line, or `sudo pacman -R svrngs-fam svrngs-bin` if you
-used the packages. Your groups stay in `~/.svrngs` until you delete that
-folder.
+```
+omarchy plugin remove svrngs.fam
+```
+
+To remove svrngs too, first decide about your groups. Removing svrngs from
+this computer doesn't take you out of them; `svrngs leave <group>` does, so
+run that for each group you want to leave before you go on.
+
+If you got svrngs with Get svrngs or svrngs's own install line:
+
+```
+systemctl --user disable --now svrngs
+rm ~/.local/bin/svrngs ~/.config/systemd/user/svrngs.service ~/.local/share/applications/svrngs.desktop
+```
+
+If you installed the packages:
+
+```
+systemctl --user disable --now svrngs
+sudo pacman -R svrngs-fam svrngs-bin
+```
+
+Either way, your groups' data stays in `~/.svrngs` until you delete that
+folder. The install line also added `~/.local/bin` to your PATH in
+`~/.bashrc` or `~/.zshrc`; you can leave that line. If setup moved an older
+svrngs aside when you installed the packages, it's still there with
+`.before-package` in its name.
 
 ## Working on it
 
