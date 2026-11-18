@@ -1,0 +1,60 @@
+#!/usr/bin/python3 -I
+"""Point svrngs-bin at a release: bump <version> [--sums <SHA256SUMS file>]
+
+Sets pkgver (and pkgrel to 1), each platform's tarball sum from the
+release's SHA256SUMS (the one svrngs's build-release.sh writes, kept on its
+GitHub Release), and the sums of the package's own files from their bytes
+here. Without --sums it reads the release's SHA256SUMS from GitHub. A
+release missing a platform the package builds for is refused, never left
+at an old sum.
+"""
+
+import hashlib
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent / "svrngs-bin"
+PKGBUILD = HERE / "PKGBUILD"
+RELEASES = "https://github.com/alexsbryan/svrngs/releases/download"
+PLATFORMS = {"x86_64": "svrngs-linux-x86_64.tar.gz", "aarch64": "svrngs-linux-aarch64.tar.gz"}
+
+
+def sums_of(text):
+    found = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+            found[parts[1].lstrip("*")] = parts[0]
+    return found
+
+
+def main(argv):
+    if not argv or not re.fullmatch(r"\d+\.\d+\.\d+", argv[0]):
+        raise SystemExit(__doc__.strip().splitlines()[0])
+    version = argv[0]
+    if "--sums" in argv:
+        text = Path(argv[argv.index("--sums") + 1]).read_text()
+    else:
+        with urllib.request.urlopen(f"{RELEASES}/v{version}/SHA256SUMS", timeout=30) as reply:
+            text = reply.read().decode()
+    released = sums_of(text)
+    missing = [name for name in PLATFORMS.values() if name not in released]
+    if missing:
+        raise SystemExit(f"bump: v{version}'s SHA256SUMS lists no {', '.join(missing)}, so nothing changed")
+
+    s = PKGBUILD.read_text()
+    s = re.sub(r"(?m)^pkgver=.*$", f"pkgver={version}", s)
+    s = re.sub(r"(?m)^pkgrel=.*$", "pkgrel=1", s)
+    for arch, name in PLATFORMS.items():
+        s = re.sub(rf"(?m)^sha256sums_{arch}=\(.*\)$", f"sha256sums_{arch}=('{released[name]}')", s)
+    local = re.search(r"(?m)^source=\((.*)\)$", s).group(1).split()
+    own = " ".join(f"'{hashlib.sha256((HERE / f).read_bytes()).hexdigest()}'" for f in local)
+    s = re.sub(r"(?m)^sha256sums=\(.*\)$", f"sha256sums=({own})", s)
+    PKGBUILD.write_text(s)
+    print(f"svrngs-bin is v{version}: x86_64 {released[PLATFORMS['x86_64']][:12]}…, aarch64 {released[PLATFORMS['aarch64']][:12]}…")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

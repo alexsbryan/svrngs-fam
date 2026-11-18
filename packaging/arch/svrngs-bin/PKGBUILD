@@ -1,0 +1,29 @@
+# svrngs from its GitHub Release: the same files the group page's get/
+# serves (svrn-docs rings/current/SVRNGS_PACKAGE.md). `../bump <version>`
+# sets pkgver and the release's sums. The package owns /usr/bin/svrngs and
+# updates it; updated-by tells svrngs so, and it never replaces itself.
+pkgname=svrngs-bin
+pkgver=1.10.0
+pkgrel=1
+pkgdesc="Keep what your group shares on your own computers"
+arch=('x86_64' 'aarch64')
+url="https://github.com/alexsbryan/svrngs"
+license=('AGPL-3.0-or-later')
+provides=('svrngs')
+conflicts=('svrngs')
+options=('!strip' '!debug')
+_release="https://github.com/alexsbryan/svrngs/releases/download/v$pkgver"
+source=(svrngs.service svrngs.desktop updated-by setup-user)
+source_x86_64=("svrngs-$pkgver-linux-x86_64.tar.gz::$_release/svrngs-linux-x86_64.tar.gz")
+source_aarch64=("svrngs-$pkgver-linux-aarch64.tar.gz::$_release/svrngs-linux-aarch64.tar.gz")
+sha256sums=('0797c1d58b8d87c0c2fb3c012ded52daf224050a2e8a3338ca9c341c7f1180c8' '6dcd7c1c04be91b04bf5bf82e5b6510d503ad0a3391d751c56fb6ed04e4ba484' '21349ecb41e038213940ee68a5ebf839fc8b111727dda38550b3941999ecc5e9' '8c3867de771a4bb199c980f3e49c75775e6a665fae740e49b37f1f9e8c352ce0')
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  install -Dm755 "$srcdir/svrngs" "$pkgdir/usr/bin/svrngs"
+  install -Dm644 svrngs.service "$pkgdir/usr/lib/systemd/user/svrngs.service"
+  install -Dm644 updated-by "$pkgdir/usr/lib/svrngs/updated-by"
+  install -Dm644 svrngs.desktop "$pkgdir/usr/share/applications/svrngs.desktop"
+  install -Dm755 setup-user "$pkgdir/usr/share/svrngs/setup-user"
+}

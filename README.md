@@ -22,11 +22,19 @@ Omarchy's shell does not reload a linked plugin on save (its watcher does
 not follow the link): `omarchy restart shell` loads a change.
 `omarchy-shell svrngs.fam status` says what the widget holds.
 
-## Package
+## Packages
 
-    cd packaging/arch && makepkg -f
-    sudo pacman -U svrngs-fam-*.pkg.tar.zst
-    /usr/share/svrngs-fam/setup-user   # as yourself: links it and puts it in the bar
+Two, in `packaging/arch/`: `svrngs-bin` (svrngs itself, from its GitHub
+Release; svrn-docs `rings/current/SVRNGS_PACKAGE.md`) and `svrngs-fam` (this
+plugin, which needs it).
+
+    packaging/arch/bump 1.11.0             # svrngs-bin to a release, by its SHA256SUMS
+    (cd packaging/arch/svrngs-bin && makepkg -f)
+    (cd packaging/arch/svrngs-fam && makepkg -f)
+    sudo pacman -U packaging/arch/*/*.pkg.tar.zst
+    /usr/share/svrngs/setup-user           # as yourself: the packaged svrngs runs, an
+                                           # install-line one moved aside; ~/.svrngs kept
+    /usr/share/svrngs-fam/setup-user       # as yourself: the icon in the bar
 
 ## Tests
 

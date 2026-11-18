@@ -7,11 +7,10 @@ pkgdesc="svrngs in the Omarchy bar: lend what you're building, use your people's
 arch=('any')
 url="https://svrnme.sh"
 license=('MIT')
-depends=('omarchy' 'python' 'iproute2' 'wl-clipboard')
-optdepends=('svrngs: what the plugin shows and acts on')
+depends=('omarchy' 'svrngs' 'python' 'iproute2' 'wl-clipboard')
 
 package() {
-  local src="$startdir/../.."
+  local src="$startdir/../../.."
   local dest="$pkgdir/usr/share/svrngs-fam"
   install -Dm644 "$src/manifest.json" "$dest/manifest.json"
   install -Dm644 -t "$dest" "$src/Panel.qml" "$src/Service.qml" "$src/Model.js"
