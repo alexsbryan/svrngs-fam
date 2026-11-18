@@ -42,18 +42,24 @@ presses one, Escape closes the panel.
 
 ## Get it
 
-You need [Omarchy](https://omarchy.org) and svrngs. Both packages are on
-the AUR:
+You need [Omarchy](https://omarchy.org). Install svrngs and the plugin
+from this repository's [latest release](https://github.com/alexsbryan/svrngs-fam/releases/latest),
+then start them as yourself:
 
 ```
-yay -S svrngs-fam                       # brings svrngs-bin with it
+sudo pacman -U \
+  https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0/svrngs-bin-1.11.0-1-x86_64.pkg.tar.zst \
+  https://github.com/alexsbryan/svrngs-fam/releases/download/v0.2.0/svrngs-fam-0.2.0-1-any.pkg.tar.zst
 /usr/share/svrngs/setup-user            # starts svrngs
 /usr/share/svrngs-fam/setup-user        # puts the icon in your bar
 ```
 
 If you already run svrngs from its install line, `setup-user` moves that
 copy aside (it doesn't delete it) and your groups carry on as they were.
-From then on, svrngs updates with your system updates.
+From then on the package keeps svrngs, so it doesn't update itself: a
+new release is a new `pacman -U` from here, until svrngs reaches Omarchy's
+own package repository and arrives with `omarchy update`. (The AUR isn't
+taking new accounts, so it isn't there yet.)
 
 New to svrngs? [Start a group](https://github.com/alexsbryan/svrngs#start-a-group)
 first, or ask a friend for a link. Lending and models are explained in
@@ -80,7 +86,7 @@ says what the widget currently holds.
 | `Model.js` | What the icon and the lists show, kept apart so it can be tested |
 | `bin/svrngs-fam` | The helper. Every read and action goes through it, and only it reads svrngs's key |
 | `i18n/en.json` | The words |
-| `packaging/arch/` | The two AUR packages, and `bump`, which points `svrngs-bin` at a new svrngs release |
+| `packaging/arch/` | The two packages, and `bump`, which points `svrngs-bin` at a new svrngs release |
 | `omarchy/` | Drafts of `omarchy install service svrngs`, for proposing to Omarchy |
 
 `tests/run` runs every test in about a minute: the helper against a
