@@ -2,18 +2,11 @@
 
 Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 
-Click the people icon in the bar and you see three things: what's running
-on this computer that you could lend, the models your friends lend you,
-and your groups with what each person in them shares. Lend the app you're
-working on and your friends can open it as themselves. Copy the address of
-a friend's model and any program on your computer can use it, while their
-computer does the work. Start typing to find something across all your
-groups.
+Lend the app you're running, use your friends' models, and open what your
+groups share, from one icon.
 
-Nothing is lent until you say yes twice, once to Lend and once to the
-question that follows. Your svrngs key stays on your computer and never
-reaches the clipboard. While the panel is closed the plugin runs nothing,
-apart from one quick check when svrngs restarts.
+Nothing is lent until you say yes twice. Your svrngs key stays on your
+computer, and the plugin sits idle while its panel is closed.
 
 ## Install
 
