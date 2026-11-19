@@ -55,7 +55,7 @@ STATE = {
     "svrngs": "running", "groups": GROUPS, "command": True, "groupsCut": False,
     "mine": [{"name": "library", "port": 8083, "groups": [HOUSE], "readable": True}],
     "lends": LENDS,
-    "listeners": [{"port": 3000, "program": "puma", "name": "garden", "pid": 1}],
+    "listeners": [{"port": 3000, "program": "puma", "name": "garden", "pid": 1, "start": 1}],
 }
 MODELS = {"ok": True, "asked": 3, "lends": [
     {"person": "Sam", "name": "coder", "group": "House", "label": "sam3", "address": origin("sam3") + "v1", "models": ["qwen3-coder-30b"]},

@@ -83,17 +83,76 @@ function lent(answer) {
       port: m.port,
       groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" }),
       answering: answering[m.name] === false ? false : true,
-      held: held[m.name] || ""
+      held: held[m.name] || "",
+      now: nowOf(m)
     }
   })
 }
 
+// The catalog key for why svrngs holds a lend of yours closed, for each
+// reason the panel has words for (svrngs lend.rs `Hold`). Any other reason
+// is still held: its line says so, and offers nothing to press.
+var HELD = { another: "here.heldAnother", unjudged: "here.heldUnjudged", unapproved: "here.heldUnapproved" }
+
+function heldKey(held) {
+  return Object.prototype.hasOwnProperty.call(HELD, held) ? HELD[held] : "here.heldUnknown"
+}
+
+// What answers on a lend's port now, from the helper's read of this
+// computer: null when it wasn't read; else whether anything runs there and,
+// when it is a program the panel lends, the process Keep sharing it names.
+function nowOf(m) {
+  if (!m || m.now === undefined) return null
+  if (m.now === null) return { running: false, keep: false, program: "", name: "", pid: null, start: null }
+  var n = m.now
+  var counted = function(v) { return typeof v === "number" && v >= 0 && Math.floor(v) === v }
+  return { running: true, keep: counted(n.pid) && counted(n.start), program: n.program || "", name: n.name || "", pid: n.pid, start: n.start }
+}
+
+// Whether a lend of yours offers Keep sharing it: svrngs holds it for a
+// reason the panel knows, and a program the panel lends answers there now.
+function keepable(l) {
+  return !!l && l.held !== "" && heldKey(l.held) !== "here.heldUnknown" && l.now !== null && l.now.keep === true
+}
+
+// The helper's argv to keep sharing `l`, to the process its line shows.
+// svrngs approves that process and changes nothing else of the share.
+function approveArgs(l) {
+  return ["approve", l.name, "--pid", processOf(l.now)]
+}
+
+// A process as svrngs is told it: its pid and its start, so a pid that now
+// names another process is refused, not lent.
+function processOf(p) {
+  return String(p.pid) + "@" + String(p.start)
+}
+
 // What runs here and could be lent. The helper already leaves out what is
 // lent, svrngs itself, browsers' debug ports and the rest of its deny list.
-// Each keeps the pid of the process shown, which lending it names.
+// Each keeps the pid and start of the process shown, which lending it names,
+// and is offered under a name no other port's lend has.
 function offers(answer) {
   if (!running(answer) || !answer.listeners) return []
-  return answer.listeners.map(function(l) { return { port: l.port, program: l.program, name: l.name || l.program, pid: l.pid } })
+  return answer.listeners.map(function(l) {
+    return { port: l.port, program: l.program, name: freeName(l.name || l.program, l.port, answer.mine), pid: l.pid, start: l.start }
+  })
+}
+
+// A lend's name is its address, where friends' browsers keep its sign-ins
+// and links, and svrngs refuses one already lent for another port unless
+// told to replace it, which the panel never says. So a name another port's
+// lend has (or a lend whose port can't be read) is offered as name-2,
+// name-3 and so on, the first that's free.
+function freeName(wanted, port, mine) {
+  var taken = Object.create(null)
+  ;(mine || []).forEach(function(m) { if (m.port !== port) taken[m.name] = true })
+  var base = cleanName(wanted)
+  var name = base
+  for (var n = 2; taken[name]; n++) {
+    var suffix = "-" + n
+    name = base.slice(0, 40 - suffix.length).replace(/-+$/, "") + suffix
+  }
+  return name
 }
 
 // Each group's lends from other people, for Open.
@@ -106,8 +165,8 @@ function friendsLends(answer, group) {
 }
 
 // Whether a lend can be opened now: its program runs, and svrngs doesn't
-// hold it closed because another program answers in its place: another
-// account's, or another app sandbox's (svrngs 1.12.1).
+// hold it closed, for any reason (the helper gives one it doesn't know as
+// "unknown").
 function opens(l) {
   return l.answering !== false && !l.held
 }
@@ -128,9 +187,9 @@ function labelOf(origin) {
 // The helper's argv to lend `offer` to `group` as `name`. The program is
 // always said: svrngs refuses a port it does not know without it (S0 (c)).
 // So is the process the panel showed: svrngs lends the port only if that
-// process holds it, and keeps the lend to its program (svrngs 1.12.2).
+// process holds every socket on it, and keeps the lend to those sockets.
 function shareArgs(offer, groupId, name) {
-  return ["share", String(offer.port), groupId, name, "--program", offer.program, "--pid", String(offer.pid)]
+  return ["share", String(offer.port), groupId, name, "--program", offer.program, "--pid", processOf(offer)]
 }
 
 // A name svrngs takes for a lend, as the helper makes them.

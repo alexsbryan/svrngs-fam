@@ -34,16 +34,32 @@ def check(name, got, want):
 
 
 # Stands in for the svrngs command: says what svrngs says, as it says it
-# (svrngs cli.rs), and keeps the argv and stdin it was given.
+# (svrngs cli.rs), and keeps the argv and stdin it was given. $HOME/old-svrngs
+# names an older svrngs, whose `parse` reads every flag before the command:
+# 1.11 has no --pid, 1.12.2's takes a process id alone, and neither has
+# approve. $HOME/refuse holds what svrngs refuses a share or approval with,
+# as when the process named has stopped.
 FAKE_COMMAND = r"""#!/bin/bash
 printf '%s\n' "$@" > "$HOME/svrngs-argv"
 cat > "$HOME/svrngs-stdin"
+old=$(cat "$HOME/old-svrngs" 2>/dev/null)
+# What was typed, refused before anything runs (main.rs), then the usage.
+unparsed() { printf 'svrngs: %s\n\nsvrngs — keep what your group shares on your own computers.\n' "$1" >&2; exit 1; }
+# What svrngs refused once it ran.
+refused() { printf 'svrngs: %s\n' "$(cat "$HOME/refuse")" >&2; exit 1; }
+prev=
+for arg in "$@"; do
+  [ "$old" = 1.11 ] && [ "$arg" = --pid ] && unparsed 'unknown argument `--pid`'
+  [ "$old" = 1.12.2 ] && [ "$prev" = --pid ] && ! [[ $arg =~ ^[0-9]+$ ]] && unparsed "--pid \`$arg\` is not a process id"
+  prev=$arg
+done
 case "$1" in
+  approve)
+    [ -n "$old" ] && unparsed 'unknown command `approve`'
+    [ -e "$HOME/refuse" ] && refused
+    echo "You lend $2 again, to python3 in ~/notes-app. Its groups and terms are as they were." ;;
   share)
-    if [ -e "$HOME/old-svrngs" ] && [ "$9" = "--pid" ]; then
-      printf 'svrngs: unknown argument `--pid`\n\nsvrngs — keep what your group shares on your own computers.\n' >&2
-      exit 2
-    fi
+    [ -e "$HOME/refuse" ] && refused
     printf 'If %s takes a password on each request, type it here (Enter alone for none): ' "$6" >&2
     echo "You lend $6 (port $2) to the groups you chose, as many at once as want it. To let fewer in at once, change it on your home page, or \`svrngs share $2 --group <group> --limit <number>\`."
     echo "svrngs doesn't know $8, so your friends can reach every part of it that its own sign-in allows."
@@ -105,6 +121,39 @@ def listen(port, title=None, folder=None):
     raise SystemExit(f"a test server did not start on {port}")
 
 
+# A server that writes down its own start (/proc/self/stat field 22, read
+# while its command is still python's, which has no spaces), then names
+# itself as some programs do (/proc/self/comm), and listens.
+SERVE = r"""
+import http.server, sys
+from pathlib import Path
+Path(sys.argv[2]).write_bytes(Path("/proc/self/stat").read_bytes().split()[21])
+if sys.argv[3]:
+    Path("/proc/self/comm").write_text(sys.argv[3])
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.SimpleHTTPRequestHandler).serve_forever()
+"""
+
+
+def serve(port, home, comm="", folder=None):
+    """A server of this user's on 127.0.0.1:`port`, whose command is `comm`
+    when given, and the start it wrote down before it listened."""
+    written = home / f"start-{port}"
+    server = subprocess.Popen(["python3", "-c", SERVE, str(port), str(written), comm], cwd=folder,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(50):
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                return server, int(written.read_text())
+        time.sleep(0.1)
+    server.kill()
+    raise SystemExit(f"a test server did not start on {port}")
+
+
+# A command as a program may name itself: spaces and parentheses, which
+# /proc/<pid>/stat shows inside its own parentheses.
+ODD_COMM = "x) 1 2 (y"
+
+
 def data_dir(home, port=None, token=TOKEN, api=None):
     data = home / ".svrngs"
     (data / "lends").mkdir(parents=True, exist_ok=True)
@@ -154,13 +203,15 @@ check("stopped", state(home)["svrngs"], "stopped")
 home = case("running")
 fake = Fake()
 data_dir(home, port=fake.port)
-(home / ".svrngs/lends/garden.json").write_text(json.dumps({"port": 3000, "kind": "ruby", "groups": ["a" * 64]}))
+quiet = closed_port()
+(home / ".svrngs/lends/garden.json").write_text(json.dumps({"port": quiet, "kind": "ruby", "groups": ["a" * 64]}))
 got = state(home, "--full")
 check("running", got["svrngs"], "running")
 check("both groups read", [g["person"] for g in got["groups"]], ["LittleMac", "Ana"])
 check("a friend's long name is cut to 200", len(got["groups"][1]["name"]), 200)
 check("a friend's lend is read", got["lends"]["a" * 64]["lent"][0]["name"], "deepseek-flash")
-check("this computer's lend, its port and its groups", got["mine"], [{"name": "garden", "port": 3000, "groups": ["a" * 64], "readable": True}])
+check("this computer's lend, its port, its groups, and that nothing answers there now", got["mine"],
+      [{"name": "garden", "port": quiet, "groups": ["a" * 64], "readable": True, "now": None}])
 check("asked with the token", all(s["headers"].get("Authorization") == f"Bearer {TOKEN}" for s in fake.seen), True)
 check("never with an Origin", any("Origin" in s["headers"] for s in fake.seen), False)
 fake.close()
@@ -205,13 +256,15 @@ check("foreign address: never asked", "192.168" in got.get("reason", ""), True)
 home = case("what runs here, and what is offered")
 fake = Fake()
 data_dir(home, port=fake.port)
-puma_port, folder_port, lent_port = closed_port(), closed_port(), closed_port()
+puma_port, folder_port, lent_port, odd_port = closed_port(), closed_port(), closed_port(), closed_port()
 (home / "notes-app").mkdir()
 (home / ".svrngs/lends/lentone.json").write_text(json.dumps({"port": lent_port, "kind": "python3", "groups": []}))
+odd, odd_start = serve(odd_port, home, comm=ODD_COMM, folder=home / "notes-app")
 servers = [
     listen(puma_port, title=f"puma 8.1.2 (tcp://127.0.0.1:{puma_port}) [My Garden]"),
     listen(folder_port, folder=home / "notes-app"),
     listen(lent_port),
+    odd,
 ]
 debug = None
 try:
@@ -223,6 +276,8 @@ try:
 finally:
     for server in servers + ([debug] if debug else []):
         server.kill()
+check("each offer names its process, by pid and start",
+      {k: (offered.get(odd_port) or {}).get(k) for k in ("pid", "start")}, {"pid": odd.pid, "start": odd_start})
 check("puma is named by its own title", (offered.get(puma_port) or {}).get("program"), "puma")
 check("and offered under its app's name", (offered.get(puma_port) or {}).get("name"), "my-garden")
 check("a server in its folder is offered under the folder's name", (offered.get(folder_port) or {}).get("name"), "notes-app")
@@ -242,8 +297,9 @@ fake.lends = {"lent": [
     {"person": "Mallory", "name": "elsewhere", "kind": "spot", "origin": "http://model2.localhost:1/"},
     {"person": "Fedora", "name": "asleep", "kind": "spot", "origin": f"http://model3.localhost:{fake.port}/", "answering": False},
     {"person": "Fedora", "name": "taken", "kind": "spot", "origin": f"http://model4.localhost:{fake.port}/", "answering": True, "held": "another"},
+    {"person": "Fedora", "name": "newer", "kind": "spot", "origin": f"http://model5.localhost:{fake.port}/", "answering": True, "held": "paused"},
 ]}
-fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"], "model3": ["y"], "model4": ["z"]}
+fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"], "model3": ["y"], "model4": ["z"], "model5": ["w"]}
 got, _ = run(home, "models")
 check("one model found", [(m["person"], m["name"], m["models"]) for m in got["models"]], [("Fedora", "coder", ["qwen3-coder"])])
 check("of two friends' lends asked at svrngs's own address", got["asked"], 2)
@@ -253,9 +309,43 @@ check("your own lend is not asked", "mine1" in asked, False)
 check("a lend not at svrngs's own address is never sent the token", "model2" in asked, False)
 check("a lend its lender says is not running is not asked", "model3" in asked, False)
 check("nor one svrngs holds closed", "model4" in asked, False)
+check("nor one held for a reason this helper doesn't know", "model5" in asked, False)
 full = state(home, "--full")["lends"]["a" * 64]["lent"]
-check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, False, True])
-check("and whether svrngs holds it closed", [l["held"] for l in full], [None, None, None, None, None, "another"])
+check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, False, True, True])
+check("and whether svrngs holds it closed", [l["held"] for l in full], [None, None, None, None, None, "another", "unknown"])
+fake.close()
+
+home = case("a held lend: why, and what answers on its port now")
+fake = Fake()
+data_dir(home, port=fake.port)
+(home / "garden-app").mkdir()
+garden_port, quiet_port, browser_port = closed_port(), closed_port(), closed_port()
+for name, port in (("garden", garden_port), ("quiet", quiet_port), ("browser", browser_port)):
+    (home / f".svrngs/lends/{name}.json").write_text(json.dumps({"port": port, "kind": "python3", "groups": ["a" * 64]}))
+own = lambda name, **held: {"person": "LittleMac", "name": name, "kind": "python3", "origin": f"http://{name}1.localhost:{fake.port}/", **held}
+fake.lends = {"lent": [
+    own("garden", held="unapproved"), own("quiet", held="another"), own("browser", held="unjudged"),
+    own("paused", held="paused"), own("shaped", held={"why": "a newer svrngs's"}), own("listed", held=["another"]),
+    own("open"), own("nulled", held=None), own("blank", held=""),
+]}
+garden, garden_start = serve(garden_port, home, comm=ODD_COMM, folder=home / "garden-app")
+browser, _ = serve(browser_port, home, comm="chromium")
+try:
+    full, quick = state(home, "--full"), state(home, "--here")
+finally:
+    garden.kill()
+    browser.kill()
+check("svrngs's reasons pass through; one this helper doesn't know is held all the same",
+      [l["held"] for l in full["lends"]["a" * 64]["lent"]],
+      ["unapproved", "another", "unjudged", "unknown", "unknown", "unknown", None, None, None])
+now = {m["name"]: m.get("now", "unread") for m in full["mine"]}
+check("on its port now: the name it would be offered under, and its pid",
+      {k: (now["garden"] or {}).get(k) for k in ("name", "pid")}, {"name": "garden-app", "pid": garden.pid})
+check("and its start, read past a command holding spaces and parentheses", (now["garden"] or {}).get("start"), garden_start)
+check("nothing on its port: nothing answers", now["quiet"], None)
+check("a program the panel never lends: nothing to keep sharing", (now["browser"] or {}).get("pid", "absent"), None)
+check("the quick read of this computer says the same", {m["name"]: m.get("now") for m in quick["mine"]}["garden"], now["garden"])
+check("a lent port is still not offered", garden_port in {l["port"] for l in full["listeners"]}, False)
 fake.close()
 
 home = case("groups asked together, a quick read, the group's own apps")
@@ -334,19 +424,48 @@ check("no password: an empty line", (home / "svrngs-stdin").read_text(), "\n")
 check("svrngs's words, without the password question or the terminal tips", got["said"],
       "You lend garden (port 3000) to the groups you chose, as many at once as want it.\n"
       "svrngs doesn't know puma, so your friends can reach every part of it that its own sign-in allows.")
-got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242")
-check("svrngs is told the process the panel showed", (home / "svrngs-argv").read_text().split()[-2:], ["--pid", "4242"])
-got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "42; rm")
-check("a pid that isn't a number is refused, svrngs not run", (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (False, ["--pid", "4242"]))
-(home / "old-svrngs").write_text("")
-got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242")
-check("an svrngs from before --pid: what to do", (got["ok"], got["said"]),
-      (False, "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."))
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
+check("svrngs is told the process the panel showed, by its pid and start", (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (True, ["--pid", "4242@987654"]))
+for bad in ("42; rm", "4242", "4242@", "@99", "4242@99@1"):
+    got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", bad)
+    check(f"--pid {bad!r}, not a process and its start, is refused, svrngs not run",
+          (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (False, ["--pid", "4242@987654"]))
+NEWER = "Lending from here needs svrngs 1.12.3 or later. Update svrngs on its home page, then try again."
+for old in ("1.11", "1.12.2"):
+    (home / "old-svrngs").write_text(old)
+    got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
+    check(f"svrngs {old}, before --pid <pid>@<start>: lending says what to do", (got["ok"], got["said"]), (False, NEWER))
 (home / "old-svrngs").unlink()
+(home / "refuse").write_text("that program stopped; choose it again")
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
+check("a stale selection: svrngs's refusal is said", (got["ok"], got["said"]), (False, "svrngs: that program stopped; choose it again"))
+(home / "refuse").write_text("another program also listens on port 3000")
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
+check("a second program on the port: svrngs's refusal is said", (got["ok"], got["said"]), (False, "svrngs: another program also listens on port 3000"))
+(home / "refuse").unlink()
 got, _ = run(home, "unshare", "garden")
 check("stopped", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["unshare", "garden"]))
 got, _ = run(home, "start")
 check("start asks svrngs to restart itself", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["restart"]))
+
+home = case("keep sharing a held lend")
+data_dir(home)
+got, _ = run(home, "approve", "garden", "--pid", "4242@987654")
+check("svrngs approves the process the line showed, and is told nothing else",
+      (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["approve", "garden", "--pid", "4242@987654"]))
+check("svrngs's words are said", got["said"], "You lend garden again, to python3 in ~/notes-app. Its groups and terms are as they were.")
+for args in (["garden"], ["garden", "--pid", "4242"], ["garden", "--pid"], ["--replace", "--pid", "4242@1"], ["-x", "--pid", "4242@1"]):
+    got, _ = run(home, "approve", *args)
+    check(f"approve {' '.join(args)}: refused, svrngs not run",
+          (got["ok"], (home / "svrngs-argv").read_text().split()), (False, ["approve", "garden", "--pid", "4242@987654"]))
+for old in ("1.11", "1.12.2", "no-approve"):
+    (home / "old-svrngs").write_text(old)
+    got, _ = run(home, "approve", "garden", "--pid", "4242@987654")
+    check(f"an svrngs without approve ({old}): what to do", (got["ok"], got["said"]), (False, NEWER))
+(home / "old-svrngs").unlink()
+(home / "refuse").write_text("that program stopped; choose it again")
+got, _ = run(home, "approve", "garden", "--pid", "4242@987654")
+check("a stale selection: svrngs's refusal is said", (got["ok"], got["said"]), (False, "svrngs: that program stopped; choose it again"))
 
 print("ALL OK" if not failures else f"{len(failures)} FAILED")
 SCRATCH.cleanup()

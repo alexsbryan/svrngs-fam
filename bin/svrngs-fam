@@ -9,7 +9,10 @@ Verbs:
   state [--full | --here]         svrngs's state; --full adds what each group
                                   lends and what listens on this computer,
                                   --here only what listens on this computer
-  share <port> <group> <name> [--program <kind>] [--pid <pid>] [--password-stdin]
+  share <port> <group> <name> [--program <kind>] [--pid <pid>@<start>] [--password-stdin]
+  approve <name> --pid <pid>@<start>
+                                  keeps sharing a held share, to the process
+                                  named, which now answers on its port
   unshare <name> [--group <group>]
   models [--skip <label,...>]     friends' lends that answer OpenAI's
                                   v1/models, each with the address to use;
@@ -192,36 +195,87 @@ SS_LINE = re.compile(r"^\S+\s+\d+\s+\d+\s+(?P<local>\S+)\s+\S+\s*(?P<process>.*)
 SS_PROC = re.compile(r'\(\("(?P<name>[^"]+)",pid=(?P<pid>\d+)')
 
 
-def listeners(skip_ports):
-    """TCP listeners of this user's processes, on loopback or every address.
-    `ss -p` names a process only when it is this user's, so an unnamed row is
-    someone else's and is never offered."""
+def listening():
+    """Each port something listens on over TCP, on loopback or every address,
+    with who listens there in `ss`'s order: (command, pid) for this user's
+    processes, None for one `ss -p` doesn't name, which is someone else's.
+    None when `ss` can't be run."""
     try:
         out = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True, timeout=TIMEOUT).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
-    seen = {}
+    found = {}
     for line in out.splitlines():
         match = SS_LINE.match(line.strip())
         if not match:
             continue
-        local = match.group("local")
-        host, _, port = local.rpartition(":")
+        host, _, port = match.group("local").rpartition(":")
         if not port.isdigit():
             continue
-        port = int(port)
         if host not in ("127.0.0.1", "[::1]", "0.0.0.0", "*", "[::]") and not host.startswith("127."):
             continue
         proc = SS_PROC.search(match.group("process"))
-        if not proc:
+        found.setdefault(int(port), []).append((proc.group("name"), int(proc.group("pid"))) if proc else None)
+    return found
+
+
+def lendable(port, holder):
+    """The listener `holder` on `port` as the panel would lend it: its pid,
+    the start svrngs checks it by, its program and the name to offer, or
+    None when the panel never lends it (someone else's, on the deny list,
+    or gone before its start was read)."""
+    if holder is None or port in DENY_PORTS or holder[0] in DENY_PROGRAMS:
+        return None
+    command, pid = holder
+    start = started(pid)
+    if start is None:
+        return None
+    program, offered = describe(pid, command)
+    return {"pid": pid, "start": start, "program": text(program), "name": offered}
+
+
+def listeners(listed, skip_ports):
+    """What could be lent from here: on each port, the first listener the
+    panel lends. None when `ss` couldn't be read."""
+    if listed is None:
+        return None
+    seen = []
+    for port, holders in sorted(listed.items()):
+        if port in skip_ports or port in ROOM_PORTS:
             continue
-        name = proc.group("name")
-        if port in skip_ports or port in DENY_PORTS or port in ROOM_PORTS or name in DENY_PROGRAMS:
-            continue
-        pid = int(proc.group("pid"))
-        program, offered = describe(pid, name)
-        seen.setdefault(port, {"port": port, "program": text(program), "name": offered, "pid": pid})
-    return rows(sorted(seen.values(), key=lambda r: r["port"]))[0]
+        offer = next(filter(None, (lendable(port, h) for h in holders)), None)
+        if offer:
+            seen.append({"port": port, **offer})
+    return rows(seen)[0]
+
+
+def answering_now(listed, port):
+    """What answers on one of this computer's lends' ports now, for its line
+    while svrngs holds it: None when nothing listens there; else the
+    listener as `lendable` gives it, with no pid or start (so nothing for
+    Keep sharing it to name) when the panel doesn't lend it."""
+    holders = listed.get(port) or []
+    if not holders:
+        return None
+    found = next(filter(None, (lendable(port, h) for h in holders)), None)
+    return found or {"pid": None, "start": None, "program": "", "name": ""}
+
+
+def started(pid):
+    """When process `pid` started, in clock ticks after boot: field 22 of
+    /proc/<pid>/stat (proc(5)), the start svrngs checks a --pid by. Field 2 is
+    its command in parentheses, which may hold spaces and parentheses of its
+    own, so the fields are counted after the last ')'. None when it can't be
+    read: the process has gone."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_bytes()
+    except OSError:
+        return None
+    _, closed, after = stat.rpartition(b")")
+    fields = after.split()
+    if not closed or len(fields) < 20 or not fields[19].isdigit():
+        return None
+    return int(fields[19])
 
 
 # Puma rewrites its process title: `puma 8.1.2 (tcp://127.0.0.1:3000) [garden]`,
@@ -280,14 +334,36 @@ def state(full):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 report["lends"] = dict(zip(asked, pool.map(lambda ns: lends_of(at, secret, ns), asked)))
         if full in ("full", "here"):
+            listed = listening()
             skip = {at[1]} | {m["port"] for m in report["mine"] if m["port"]}
-            report["listeners"] = listeners(skip)
+            report["listeners"] = listeners(listed, skip)
+            # What answers on each lend's port now, from the same read: what
+            # its line shows, and Keep sharing it names, while svrngs holds it.
+            for m in report["mine"] if listed is not None else []:
+                if isinstance(m["port"], int):
+                    m["now"] = answering_now(listed, m["port"])
     except Stopped:
         report["svrngs"] = "stopped"
     except Unreadable as e:
         report["svrngs"] = "unreadable"
         report["reason"] = str(e)
     return report
+
+
+# Why svrngs holds a lend closed, so nobody can open it while its program
+# runs (svrngs lend.rs `Hold`): what answers on its port isn't what its
+# lender approved, "another"; what answers can't be read, "unjudged"; or, for
+# a share made before svrngs 1.12.3, nothing was approved yet, "unapproved".
+HELD = ("another", "unjudged", "unapproved")
+
+
+def held_of(value):
+    """A lend's `held` as the panel reads it: None only when svrngs says
+    nothing holds it. A value this helper doesn't know, from a newer svrngs,
+    is "unknown", and held all the same."""
+    if value is None or value is False or value == "":
+        return None
+    return value if value in HELD else "unknown"
 
 
 def lends_of(at, secret, namespace):
@@ -308,11 +384,7 @@ def lends_of(at, secret, namespace):
                 # Whether its program answered its lender just now; None from
                 # an svrngs that does not say (svrngs door.rs `answering`).
                 "answering": l.get("answering") if isinstance(l.get("answering"), bool) else None,
-                # Why nobody can open it while its program runs: "another"
-                # account's program answers on its port, or whose can't be
-                # told, "unjudged"; None when nothing holds it (svrngs
-                # lend.rs `Hold`, from 1.12).
-                "held": l.get("held") if l.get("held") in ("another", "unjudged") else None,
+                "held": held_of(l.get("held")),
                 # An app the group's folder carries, served by every computer
                 # in it: listed once, as the group's, not one person's.
                 "carried": bool(l.get("group")),
@@ -325,11 +397,23 @@ def lends_of(at, secret, namespace):
     }
 
 
-def run_svrngs(args, stdin="", raw=False, newer=None):
+NEWER = "Lending from here needs svrngs 1.12.3 or later. Update svrngs on its home page, then try again."
+
+
+def older_svrngs(pid, verb=None):
+    """What an svrngs older than the panel says to `--pid <pid>@<start>`, and
+    to `verb` when it is new (svrngs cli.rs `parse`, which reads every flag
+    before the command): before 1.12.2 it has no --pid, 1.12.2's takes a
+    process id alone, and before 1.12.3 it has no `approve`."""
+    said = ("unknown argument `--pid`", f"--pid `{pid}` is not a process id")
+    return said + ((f"unknown command `{verb}`",) if verb else ())
+
+
+def run_svrngs(args, stdin="", raw=False, older=()):
     """svrngs's reply to a command, as words for the panel; with `raw`, its
-    standard output as printed, too. `newer` maps a flag to what to say
-    when this svrngs doesn't know it yet (svrngs cli.rs: "unknown argument
-    `--flag`"), read from what svrngs said before any line is taken out."""
+    standard output as printed, too. When svrngs refuses with one of
+    `older`, it is older than the panel, and the panel says what to do
+    instead: read from what svrngs said before any line is taken out."""
     command = svrngs_command()
     if command is None:
         return {"ok": False, "said": "svrngs is not installed on this computer"}
@@ -339,9 +423,8 @@ def run_svrngs(args, stdin="", raw=False, newer=None):
         return {"ok": False, "said": "svrngs did not finish within 30 seconds"}
     if raw:
         return {"ok": done.returncode == 0, "out": done.stdout, "said": done.stderr.strip()[:4000]}
-    for flag, words in (newer or {}).items():
-        if done.returncode != 0 and f"unknown argument `{flag}`" in done.stderr:
-            return {"ok": False, "code": done.returncode, "said": words}
+    if done.returncode != 0 and any(said in done.stderr for said in older):
+        return {"ok": False, "code": done.returncode, "said": NEWER}
     # `share` asks for a password on stderr (cli.rs:1009-1033). The question
     # is not part of what svrngs said, so it is taken out whole.
     asked = re.sub(r"If .+? takes a password on each request, .+?\(Enter alone for none\):\s*", "", done.stderr, flags=re.S)
@@ -400,7 +483,7 @@ def models(skip=frozenset()):
         for l in lent:
             # Not asked: its own, or one its lender says is not running, or
             # holds closed.
-            if not isinstance(l, dict) or l.get("person") == me or l.get("answering") is False or l.get("held"):
+            if not isinstance(l, dict) or l.get("person") == me or l.get("answering") is False or held_of(l.get("held")):
                 continue
             label = lend_at(l.get("origin"), at[1])
             if label and label not in candidates:
@@ -642,6 +725,16 @@ def sums_of(listing):
     return found
 
 
+def process_of(rest):
+    """(`--pid`'s value, None), or (None, a refusal) when it isn't a process
+    and its start as the panel reads them, so svrngs is never run with it."""
+    at = rest.index("--pid") + 1
+    pid = rest[at] if at < len(rest) else ""
+    if not re.fullmatch(r"[0-9]{1,7}@[0-9]{1,20}", pid):
+        return None, {"ok": False, "said": f"not a process and its start: {text(pid)}"}
+    return pid, None
+
+
 def main(argv):
     if not argv:
         return {"ok": False, "said": __doc__.strip().splitlines()[0]}
@@ -653,16 +746,28 @@ def main(argv):
         args = ["share", port, "--group", group, "--name", name]
         if "--program" in rest:
             args += ["--program", rest[rest.index("--program") + 1]]
-        # The process the panel showed: svrngs lends the port only if that
-        # process holds it, and keeps the lend to its program (svrngs 1.12.2).
+        # The process the panel showed, by its pid and start: svrngs lends
+        # the port only if that process holds every socket on it, and
+        # refuses, saying so, when the pid now names another process.
+        pid = None
         if "--pid" in rest:
-            pid = rest[rest.index("--pid") + 1] if rest.index("--pid") + 1 < len(rest) else ""
-            if not re.fullmatch(r"[0-9]+", pid):
-                return {"ok": False, "said": f"not a process id: {text(pid)}"}
+            pid, refused = process_of(rest)
+            if refused:
+                return refused
             args += ["--pid", pid]
         secret = sys.stdin.readline() if "--password-stdin" in rest else ""
-        return run_svrngs(args, stdin=secret.strip() + "\n", newer={
-            "--pid": "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."})
+        return run_svrngs(args, stdin=secret.strip() + "\n", older=older_svrngs(pid) if pid else ())
+    # A held share kept to what answers on its port now, the process its line
+    # showed: svrngs approves that and changes nothing else of the share.
+    if verb == "approve" and rest:
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", rest[0]):
+            return {"ok": False, "said": f"not a share's name: {text(rest[0])}"}
+        if "--pid" not in rest:
+            return {"ok": False, "said": "approve wants the process to keep sharing: --pid <pid>@<start>"}
+        pid, refused = process_of(rest)
+        if refused:
+            return refused
+        return run_svrngs(["approve", rest[0], "--pid", pid], older=older_svrngs(pid, "approve"))
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]
         if "--group" in rest:

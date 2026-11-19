@@ -7,7 +7,8 @@ Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 Lend the app you're running, use your friends' models, and open what your
 groups share, from one icon.
 
-Nothing is lent until you say yes twice. Your svrngs key stays on your
+Nothing is lent until you say yes twice, and a share svrngs closes stays
+closed until you choose what it shares. Your svrngs key stays on your
 computer, and the plugin sits idle while its panel is closed.
 
 ![The svrngs panel, open on a group called House](preview.png)

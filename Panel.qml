@@ -9,7 +9,9 @@ import "Model.js" as Model
 // svrngs.fam's bar widget: the icon and its state, and a panel with what
 // this computer lends, the models your people lend, and your groups.
 // Every string from svrngs or a friend is drawn as plain text, and nothing
-// is lent without a second press.
+// is lent without a second press. A lend svrngs holds closed is kept to
+// what answers on its port now with one, Keep sharing it, beside the words
+// that say what that is.
 //
 // Laid out for someone in many groups (the study "svrngs panel at scale",
 // after svrngs V1.9's home page): a group is one line until it is opened,
@@ -80,7 +82,7 @@ Panel {
       return []
     }
     if (!finding) {
-      lent.forEach(function(l) { out.push("stop:" + l.name) })
+      lent.forEach(function(l) { out.push("stop:" + l.name); if (Model.keepable(l)) out.push("keep:" + l.name) })
       offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
       if (lending) out = out.concat(groups.length > 1 ? ["lend:group"] : [], ["lend:confirm", "lend:cancel"])
     }
@@ -143,6 +145,7 @@ Panel {
     else if (stop === "get:confirm") getSvrngs()
     else if (stop === "get:cancel") getting = false
     else if (kind === "stop") root.stop(rest)
+    else if (kind === "keep") keep(lent.filter(function(l) { return l.name === rest })[0])
     else if (stop === "lend:confirm") lend()
     else if (stop === "lend:cancel") lending = null
     else if (stop === "lend:group") nextLendGroup()
@@ -184,6 +187,33 @@ Panel {
   }
 
   function stop(name) { fam.act("stop:" + name, ["unshare", name]) }
+
+  // Keep sharing a held lend, to the process its line shows answering now.
+  function keep(l) {
+    if (Model.keepable(l)) fam.act("keep:" + l.name, Model.approveArgs(l))
+  }
+
+  // A lend of yours, in a word: why svrngs holds it closed, for any reason,
+  // before whether it runs or where it goes.
+  function lentNote(l) {
+    if (l.held !== "") return strings.t(Model.heldKey(l.held))
+    if (!l.answering) return strings.t("here.notRunning")
+    return l.groups.length > 0 ? strings.t("here.lentTo").arg(l.groups.join(", ")) : strings.t("here.lentNowhere")
+  }
+
+  // Under a held lend's line: what answers on its port now, which Keep
+  // sharing it would keep sharing. Nothing for a reason the panel doesn't
+  // know, since it offers nothing to press for one.
+  function nowWords(l) {
+    if (l.held === "" || Model.heldKey(l.held) === "here.heldUnknown") return ""
+    var said = l.held === "unapproved" ? [strings.t("here.approveWhy")] : []
+    var now = l.now
+    if (now !== null && !now.running) said.push(strings.t("here.nowNothing"))
+    else if (now !== null && !now.keep) said.push(strings.t("here.nowOther"))
+    else if (now !== null && (now.name === "" || now.name === now.program)) said.push(strings.t("here.nowProgram").arg(now.program))
+    else if (now !== null) said.push(strings.t("here.now").arg(now.program).arg(now.name))
+    return said.join(" ")
+  }
 
   function openLend(label) { fam.act("open:" + label, label === "" ? ["open"] : ["open", "--lend", label]) }
 
@@ -481,18 +511,31 @@ Panel {
 
             Repeater {
               model: root.lent
-              Line {
+              Column {
+                id: lentLine
                 required property var modelData
-                words: modelData.name + (modelData.port ? " · port " + modelData.port : "")
-                note: modelData.held === "another" ? strings.t("here.heldAnother")
-                  : modelData.held === "unjudged" ? strings.t("here.heldUnjudged")
-                  : !modelData.answering ? strings.t("here.notRunning")
-                  : modelData.groups.length > 0 ? strings.t("here.lentTo").arg(modelData.groups.join(", ")) : strings.t("here.lentNowhere")
+                width: parent.width
+                spacing: Style.space(4)
+                Line {
+                  words: lentLine.modelData.name + (lentLine.modelData.port ? " · port " + lentLine.modelData.port : "")
+                  note: root.lentNote(lentLine.modelData)
+                  Act {
+                    doing: "stop:" + lentLine.modelData.name
+                    stop: doing
+                    words: strings.t("action.stop")
+                    onClicked: root.stop(lentLine.modelData.name)
+                  }
+                }
+                Note {
+                  visible: text !== ""
+                  text: root.nowWords(lentLine.modelData)
+                }
                 Act {
-                  doing: "stop:" + modelData.name
+                  visible: Model.keepable(lentLine.modelData)
+                  doing: "keep:" + lentLine.modelData.name
                   stop: doing
-                  words: strings.t("action.stop")
-                  onClicked: root.stop(modelData.name)
+                  words: strings.t("action.keep")
+                  onClicked: root.keep(lentLine.modelData)
                 }
               }
             }
