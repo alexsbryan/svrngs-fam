@@ -40,6 +40,10 @@ printf '%s\n' "$@" > "$HOME/svrngs-argv"
 cat > "$HOME/svrngs-stdin"
 case "$1" in
   share)
+    if [ -e "$HOME/old-svrngs" ] && [ "$9" = "--pid" ]; then
+      printf "error: unexpected argument '--pid' found\n\nUsage: svrngs share [OPTIONS] <PORT>\n" >&2
+      exit 2
+    fi
     printf 'If %s takes a password on each request, type it here (Enter alone for none): ' "$6" >&2
     echo "You lend $6 (port $2) to the groups you chose, as many at once as want it. To let fewer in at once, change it on your home page, or \`svrngs share $2 --group <group> --limit <number>\`."
     echo "svrngs doesn't know $8, so your friends can reach every part of it that its own sign-in allows."
@@ -330,6 +334,15 @@ check("no password: an empty line", (home / "svrngs-stdin").read_text(), "\n")
 check("svrngs's words, without the password question or the terminal tips", got["said"],
       "You lend garden (port 3000) to the groups you chose, as many at once as want it.\n"
       "svrngs doesn't know puma, so your friends can reach every part of it that its own sign-in allows.")
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242")
+check("svrngs is told the process the panel showed", (home / "svrngs-argv").read_text().split()[-2:], ["--pid", "4242"])
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "42; rm")
+check("a pid that isn't a number is refused, svrngs not run", (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (False, ["--pid", "4242"]))
+(home / "old-svrngs").write_text("")
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242")
+check("an svrngs from before --pid: what to do", (got["ok"], got["said"]),
+      (False, "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."))
+(home / "old-svrngs").unlink()
 got, _ = run(home, "unshare", "garden")
 check("stopped", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["unshare", "garden"]))
 got, _ = run(home, "start")

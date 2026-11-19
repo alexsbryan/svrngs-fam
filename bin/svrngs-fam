@@ -9,7 +9,7 @@ Verbs:
   state [--full | --here]         svrngs's state; --full adds what each group
                                   lends and what listens on this computer,
                                   --here only what listens on this computer
-  share <port> <group> <name> [--program <kind>] [--password-stdin]
+  share <port> <group> <name> [--program <kind>] [--pid <pid>] [--password-stdin]
   unshare <name> [--group <group>]
   models [--skip <label,...>]     friends' lends that answer OpenAI's
                                   v1/models, each with the address to use;
@@ -648,8 +648,18 @@ def main(argv):
         args = ["share", port, "--group", group, "--name", name]
         if "--program" in rest:
             args += ["--program", rest[rest.index("--program") + 1]]
+        # The process the panel showed: svrngs lends the port only if that
+        # process holds it, and keeps the lend to its program (svrngs 1.12.2).
+        if "--pid" in rest:
+            pid = rest[rest.index("--pid") + 1] if rest.index("--pid") + 1 < len(rest) else ""
+            if not re.fullmatch(r"[0-9]+", pid):
+                return {"ok": False, "said": f"not a process id: {text(pid)}"}
+            args += ["--pid", pid]
         secret = sys.stdin.readline() if "--password-stdin" in rest else ""
-        return run_svrngs(args, stdin=secret.strip() + "\n")
+        done = run_svrngs(args, stdin=secret.strip() + "\n")
+        if not done["ok"] and "unexpected argument '--pid'" in done["said"]:
+            done["said"] = "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."
+        return done
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]
         if "--group" in rest:

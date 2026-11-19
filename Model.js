@@ -90,9 +90,10 @@ function lent(answer) {
 
 // What runs here and could be lent. The helper already leaves out what is
 // lent, svrngs itself, browsers' debug ports and the rest of its deny list.
+// Each keeps the pid of the process shown, which lending it names.
 function offers(answer) {
   if (!running(answer) || !answer.listeners) return []
-  return answer.listeners.map(function(l) { return { port: l.port, program: l.program, name: l.name || l.program } })
+  return answer.listeners.map(function(l) { return { port: l.port, program: l.program, name: l.name || l.program, pid: l.pid } })
 }
 
 // Each group's lends from other people, for Open.
@@ -126,8 +127,10 @@ function labelOf(origin) {
 
 // The helper's argv to lend `offer` to `group` as `name`. The program is
 // always said: svrngs refuses a port it does not know without it (S0 (c)).
+// So is the process the panel showed: svrngs lends the port only if that
+// process holds it, and keeps the lend to its program (svrngs 1.12.2).
 function shareArgs(offer, groupId, name) {
-  return ["share", String(offer.port), groupId, name, "--program", offer.program]
+  return ["share", String(offer.port), groupId, name, "--program", offer.program, "--pid", String(offer.pid)]
 }
 
 // A name svrngs takes for a lend, as the helper makes them.

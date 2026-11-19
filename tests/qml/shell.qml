@@ -115,7 +115,7 @@ ShellRoot {
       console.log("the panel's lists")
       show(running)
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
-      check("what is offered", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden" }]))
+      check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1 }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
             JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "" }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
@@ -179,7 +179,7 @@ ShellRoot {
       barPanel.lendGroup = "g2"
       barPanel.lend()
       check("svrngs is asked to lend it, as named, to the group chosen, saying the program",
-            JSON.stringify(fam.lastAsked), JSON.stringify(["share", "3000", "g2", "my-garden", "--program", "puma"]))
+            JSON.stringify(fam.lastAsked), JSON.stringify(["share", "3000", "g2", "my-garden", "--program", "puma", "--pid", "1"]))
       check("the confirm closes", barPanel.lending, null)
       check("it runs", fam.doing, "lend")
       barPanel.stop("notes")
