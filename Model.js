@@ -105,7 +105,8 @@ function friendsLends(answer, group) {
 }
 
 // Whether a lend can be opened now: its program runs, and svrngs doesn't
-// hold it closed because another account's program answers in its place.
+// hold it closed because another program answers in its place: another
+// account's, or another app sandbox's (svrngs 1.12.1).
 function opens(l) {
   return l.answering !== false && !l.held
 }

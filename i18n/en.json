@@ -37,7 +37,7 @@
   "groups.notRunning": "Not running now",
   "groups.unanswered": "%1's computer isn't answering",
   "here.notRunning": "Not running now: start it, and your people can open it",
-  "here.heldAnother": "Closed: another account's program is answering on its port. Start yours, or lend it again",
+  "here.heldAnother": "Closed: another program is answering on its port. Start yours, or lend it again",
   "here.heldUnjudged": "Closed: svrngs can't tell whose program is answering on its port",
   "action.invite": "Invite",
   "action.makeLink": "Make link",
