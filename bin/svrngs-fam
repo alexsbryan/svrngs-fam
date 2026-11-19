@@ -325,9 +325,11 @@ def lends_of(at, secret, namespace):
     }
 
 
-def run_svrngs(args, stdin="", raw=False):
+def run_svrngs(args, stdin="", raw=False, newer=None):
     """svrngs's reply to a command, as words for the panel; with `raw`, its
-    standard output as printed, too."""
+    standard output as printed, too. `newer` maps a flag to what to say
+    when this svrngs doesn't know it yet (svrngs cli.rs: "unknown argument
+    `--flag`"), read from what svrngs said before any line is taken out."""
     command = svrngs_command()
     if command is None:
         return {"ok": False, "said": "svrngs is not installed on this computer"}
@@ -337,6 +339,9 @@ def run_svrngs(args, stdin="", raw=False):
         return {"ok": False, "said": "svrngs did not finish within 30 seconds"}
     if raw:
         return {"ok": done.returncode == 0, "out": done.stdout, "said": done.stderr.strip()[:4000]}
+    for flag, words in (newer or {}).items():
+        if done.returncode != 0 and f"unknown argument `{flag}`" in done.stderr:
+            return {"ok": False, "code": done.returncode, "said": words}
     # `share` asks for a password on stderr (cli.rs:1009-1033). The question
     # is not part of what svrngs said, so it is taken out whole.
     asked = re.sub(r"If .+? takes a password on each request, .+?\(Enter alone for none\):\s*", "", done.stderr, flags=re.S)
@@ -656,10 +661,8 @@ def main(argv):
                 return {"ok": False, "said": f"not a process id: {text(pid)}"}
             args += ["--pid", pid]
         secret = sys.stdin.readline() if "--password-stdin" in rest else ""
-        done = run_svrngs(args, stdin=secret.strip() + "\n")
-        if not done["ok"] and "unexpected argument '--pid'" in done["said"]:
-            done["said"] = "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."
-        return done
+        return run_svrngs(args, stdin=secret.strip() + "\n", newer={
+            "--pid": "Lending from here needs svrngs 1.12.2 or later. Update svrngs on its home page, then try again."})
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]
         if "--group" in rest:

@@ -41,7 +41,7 @@ cat > "$HOME/svrngs-stdin"
 case "$1" in
   share)
     if [ -e "$HOME/old-svrngs" ] && [ "$9" = "--pid" ]; then
-      printf "error: unexpected argument '--pid' found\n\nUsage: svrngs share [OPTIONS] <PORT>\n" >&2
+      printf 'svrngs: unknown argument `--pid`\n\nsvrngs — keep what your group shares on your own computers.\n' >&2
       exit 2
     fi
     printf 'If %s takes a password on each request, type it here (Enter alone for none): ' "$6" >&2
