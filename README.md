@@ -28,11 +28,6 @@ alone, with no password. The invite link is used only to join your
 friend's group. Your browser then opens your home page, where you start a
 group or join theirs.
 
-Get svrngs needs a svrngs release whose installer takes a checked download.
-Until there is one, it says so, and you install svrngs with the line in
-[its README](https://github.com/alexsbryan/svrngs#start-a-group); the icon
-lights up once it's running.
-
 The plugin uses python, ss, wl-copy and gpg, which Omarchy already has.
 
 svrngs and the plugin are also built as Arch packages, for Omarchy's own

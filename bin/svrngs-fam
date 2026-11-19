@@ -308,6 +308,11 @@ def lends_of(at, secret, namespace):
                 # Whether its program answered its lender just now; None from
                 # an svrngs that does not say (svrngs door.rs `answering`).
                 "answering": l.get("answering") if isinstance(l.get("answering"), bool) else None,
+                # Why nobody can open it while its program runs: "another"
+                # account's program answers on its port, or whose can't be
+                # told, "unjudged"; None when nothing holds it (svrngs
+                # lend.rs `Hold`, from 1.12).
+                "held": l.get("held") if l.get("held") in ("another", "unjudged") else None,
                 # An app the group's folder carries, served by every computer
                 # in it: listed once, as the group's, not one person's.
                 "carried": bool(l.get("group")),
@@ -388,8 +393,9 @@ def models(skip=frozenset()):
         except (Stopped, Unreadable):
             continue
         for l in lent:
-            # Not asked: its own, or one its lender says is not running.
-            if not isinstance(l, dict) or l.get("person") == me or l.get("answering") is False:
+            # Not asked: its own, or one its lender says is not running, or
+            # holds closed.
+            if not isinstance(l, dict) or l.get("person") == me or l.get("answering") is False or l.get("held"):
                 continue
             label = lend_at(l.get("origin"), at[1])
             if label and label not in candidates:

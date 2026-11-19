@@ -117,11 +117,22 @@ ShellRoot {
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
       check("what is offered", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden" }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
-            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false }]))
+            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "" }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
       check("a group's lends from others, not yours, each running or not", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label + ":" + l.answering })),
             JSON.stringify(["Fedora:abc123:true", "Fedora:fff999:false"]))
       check("whose computer did not answer is named", JSON.stringify(Model.unanswered(fam.answer, barPanel.groups[0])), JSON.stringify(["Bo"]))
+      var held = JSON.parse(JSON.stringify(running))
+      held.lends.g1.lent[0].held = "unjudged"
+      held.lends.g1.lent[2] = { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: true, held: "another" }
+      show(held)
+      check("a friend's lend svrngs holds closed can't be opened, though its port answers",
+            JSON.stringify(Model.friendsLends(fam.answer, barPanel.groups[0]).map(function(l) { return l.label + ":" + l.answering })),
+            JSON.stringify(["abc123:false", "fff999:false"]))
+      check("nor in the group's view", JSON.stringify(Model.groupView(fam.answer, barPanel.groups[0], "").people[0].items.map(function(i) { return i.answering })),
+            JSON.stringify([false, false]))
+      check("your own lend says why svrngs holds it", JSON.stringify(barPanel.lent.map(function(l) { return l.held })), JSON.stringify(["another"]))
+      show(running)
 
       console.log("nothing runs while the panel is closed")
       readsWhenClosed = fam.reads

@@ -484,7 +484,9 @@ Panel {
               Line {
                 required property var modelData
                 words: modelData.name + (modelData.port ? " · port " + modelData.port : "")
-                note: !modelData.answering ? strings.t("here.notRunning")
+                note: modelData.held === "another" ? strings.t("here.heldAnother")
+                  : modelData.held === "unjudged" ? strings.t("here.heldUnjudged")
+                  : !modelData.answering ? strings.t("here.notRunning")
                   : modelData.groups.length > 0 ? strings.t("here.lentTo").arg(modelData.groups.join(", ")) : strings.t("here.lentNowhere")
                 Act {
                   doing: "stop:" + modelData.name

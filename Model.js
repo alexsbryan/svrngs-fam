@@ -65,12 +65,16 @@ function lent(answer) {
   if (!running(answer)) return []
   var names = {}
   groups(answer).forEach(function(g) { names[g.id] = g.name })
-  // Whether each is running, as svrngs lists it to its own groups.
+  // Whether each is running, and whether svrngs holds it closed, as svrngs
+  // lists it to its own groups.
   var answering = {}
+  var held = {}
   groups(answer).forEach(function(g) {
     var lends = answer.lends ? answer.lends[g.id] : null
     ;((lends && lends.lent) || []).forEach(function(l) {
-      if (l.person === g.person && l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
+      if (l.person !== g.person) return
+      if (l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
+      if (l.held) held[l.name] = l.held
     })
   })
   return (answer.mine || []).map(function(m) {
@@ -78,7 +82,8 @@ function lent(answer) {
       name: m.name,
       port: m.port,
       groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" }),
-      answering: answering[m.name] === false ? false : true
+      answering: answering[m.name] === false ? false : true,
+      held: held[m.name] || ""
     }
   })
 }
@@ -95,8 +100,14 @@ function friendsLends(answer, group) {
   var lends = running(answer) && answer.lends ? answer.lends[group.id] : null
   if (!lends || !lends.lent) return []
   return lends.lent.filter(function(l) { return l.person !== group.person }).map(function(l) {
-    return { person: l.person, name: l.name, label: labelOf(l.origin), answering: l.answering !== false }
+    return { person: l.person, name: l.name, label: labelOf(l.origin), answering: opens(l) }
   })
+}
+
+// Whether a lend can be opened now: its program runs, and svrngs doesn't
+// hold it closed because another account's program answers in its place.
+function opens(l) {
+  return l.answering !== false && !l.held
 }
 
 // The people of a group whose computer did not answer svrngs just now:
@@ -151,7 +162,7 @@ function groupView(answer, group, query) {
   var carriedNames = {}
   var count = 0
   ;((lends && lends.lent) || []).forEach(function(l) {
-    var item = { name: l.name, label: labelOf(l.origin), answering: l.answering !== false }
+    var item = { name: l.name, label: labelOf(l.origin), answering: opens(l) }
     if (l.carried) {
       if (carriedNames[l.name]) return
       carriedNames[l.name] = true
