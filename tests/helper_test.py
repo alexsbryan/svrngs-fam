@@ -71,7 +71,9 @@ def run(home, *args, installed=True, data=None):
         (stubs / name).write_text(body)
         (stubs / name).chmod(0o755)
     # The command is named, or named as none: never the svrngs installed here.
-    env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin",
+    runtime = home / "runtime"
+    runtime.mkdir(mode=0o700, exist_ok=True)
+    env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime),
            "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else ""}
     if data is not None:
         env["SVRNGS_DIR"] = str(data)
@@ -289,8 +291,18 @@ data_dir(home, port=fake.port)
 got, said = run(home, "open", "--lend", "garden1")
 check("opened", got["ok"], True)
 check("svrngs was asked for that lend", json.loads(fake.seen[-1]["body"]), {"lend": "garden1"})
-check("the browser got the one-time address", (home / "browser-argv").read_text().strip(), f"http://garden1.localhost:{fake.port}/svrngs-open?code=one-time-secret")
+given = (home / "browser-argv").read_text().strip()
+check("the browser is given a page in the runtime folder", given.startswith(f"file://{home}/runtime/svrngs-fam/open-"), True)
+check("not the one-time address, which no command line shows", "one-time-secret" in given, False)
+handed = Path(given[len("file://"):])
+check("the page sends it on to the one-time address", f"http://garden1.localhost:{fake.port}/svrngs-open?code=one-time-secret" in handed.read_text(), True)
+check("only this person can read the page", (oct(handed.stat().st_mode & 0o777), oct(handed.parent.stat().st_mode & 0o777)), ("0o600", "0o700"))
 check("which the helper never prints", "one-time-secret" in said, False)
+old = handed.parent / "open-old.html"
+old.write_text("spent")
+os.utime(old, (time.time() - 3600, time.time() - 3600))
+run(home, "open")
+check("a page from an earlier open is cleared", old.exists(), False)
 fake.close()
 
 home = case("invite: a new link, copied")

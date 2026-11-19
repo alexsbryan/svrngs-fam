@@ -22,15 +22,22 @@ omarchy plugin add https://github.com/alexsbryan/svrngs-fam --enable
 
 Click the people icon in your bar. If svrngs isn't on your computer yet,
 press Get svrngs. If a friend sent you an invite link, paste it first. The
-plugin downloads svrngs's installer, checks it against the svrngs release
-key, and installs svrngs for you alone, with no password. Your browser then
-opens your home page, where you start a group or join your friend's.
+plugin downloads svrngs and its installer from svrngs's latest release,
+checks both against the svrngs release key, and installs svrngs for you
+alone, with no password. The invite link is used only to join your
+friend's group. Your browser then opens your home page, where you start a
+group or join theirs.
+
+Get svrngs needs a svrngs release whose installer takes a checked download.
+Until there is one, it says so, and you install svrngs with the line in
+[its README](https://github.com/alexsbryan/svrngs#start-a-group); the icon
+lights up once it's running.
 
 The plugin uses python, ss, wl-copy and gpg, which Omarchy already has.
 
-If you'd rather have svrngs and the plugin as Arch packages,
-[svrngs-omarchy](https://github.com/alexsbryan/svrngs-omarchy) says how to
-install them.
+svrngs and the plugin are also built as Arch packages, for Omarchy's own
+package repository, which signs what it ships; they're in
+[svrngs-omarchy](https://github.com/alexsbryan/svrngs-omarchy).
 
 ## Remove
 
