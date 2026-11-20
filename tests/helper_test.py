@@ -352,6 +352,7 @@ fake.lends = {"lent": [
     own("newer", held="another", answering=True, unread={"why": "a newer svrngs's"}),
     own("debug", held="another", answering=True, answers=[{"account": "1001"}], token=LISTED),
     own("root", held="another", answering=True, answers=[{"account": "0"}], token=LISTED),
+    own("accounts", held="another", answering=True, answers=[{"account": "0"}, {"account": "1001"}], token=LISTED),
     own("paused", held="paused"), own("shaped", held={"why": "a newer svrngs's"}), own("listed", held=["another"]),
     own("open", answering=True), own("nulled", held=None), own("blank", held=""),
     {"person": "Fedora", "name": "theirs-open", "kind": "spot", "origin": f"http://f1.localhost:{fake.port}/", "answering": True},
@@ -365,7 +366,7 @@ rows_said = full["lends"]["a" * 64]["lent"]
 check("svrngs's reasons pass through, unapproved its own; one this helper doesn't know is held all the same",
       [l["held"] for l in rows_said],
       ["unapproved", "another", "unjudged", "another", "another", "another", "unjudged", "another", "another", "another", "another",
-       "another", "another", "another", "another", "another", "unknown", "unknown", "unknown", None, None, None, None])
+       "another", "another", "another", "another", "another", "another", "unknown", "unknown", "unknown", None, None, None, None])
 check("each held one's token passes through; one that is no token is none",
       [l["token"] for l in rows_said][:10], [LISTED, None, LISTED, LISTED, LISTED, None, None, LISTED, LISTED, None])
 check("what svrngs read on its port passes through", rows_said[0]["answers"], [garden_said])
@@ -376,8 +377,8 @@ now = {l["name"]: l.get("now", "unsaid") for l in rows_said}
 check("its line: the process svrngs read, by its pid and start",
       {k: (now["garden"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
 check("named by the program and the whole folder svrngs read, never its own command or the folder's last name",
-      {k: (now["garden"] or {}).get(k) for k in ("program", "folder", "name")},
-      {"program": "python3", "folder": "~/work/garden-app", "name": None})
+      {k: (now["garden"] or {}).get(k) for k in ("program", "folder", "name", "said")},
+      {"program": "python3", "folder": "~/work/garden-app", "name": None, "said": "python3 in ~/work/garden-app"})
 check("nothing svrngs could name, and its port took no connection: nothing answers", now["quiet"], None)
 other = {"pid": None, "start": None, "program": "", "folder": ""}
 for name, why in (("browser", "a program on the deny list, by its command"), ("far", "what svrngs gave no token for"),
@@ -385,14 +386,20 @@ for name, why in (("browser", "a program on the deny list, by its command"), ("f
                   ("spaced", "a token that is none"), ("debug", "another account's program on a port on the deny list")):
     check(f"{why}: nothing for Keep sharing it to name", now[name], other)
 check("another account's program svrngs listed a token for: kept by its account, with no process",
-      now["theirs"], {**other, "account": "1001"})
-check("another account named by its name on this computer, not its number", now["root"], {**other, "account": "root"})
+      now["theirs"], {**other, "account": "1001", "said": "a program of the account 1001"})
+check("another account named by its name on this computer, not its number", now["root"],
+      {**other, "account": "root", "said": "a program of the account root"})
+check("every one svrngs listed is said, as its token approves them all, not the first alone",
+      [now[n]["said"] for n in ("accounts", "mixed")],
+      ["a program of the account root and a program of the account 1001",
+       "python3 in ~/work/garden-app and a program of the account 1001"])
 check("a program beside another account's, listed with a token: the program svrngs names first, as the home page sends it",
       {k: (now["mixed"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
 check("what svrngs couldn't read: no line of what answers, its reason said instead",
       [now[n] for n in ("failed", "noreader", "newer")], ["unsaid"] * 3)
 check("a process gone since svrngs read it: said in svrngs's words, its pid and start as svrngs read them",
-      now["gone"], {"pid": garden.pid, "start": garden_start + 1, "program": "python3", "folder": "~/garden-app"})
+      now["gone"], {"pid": garden.pid, "start": garden_start + 1, "program": "python3", "folder": "~/garden-app",
+                    "said": "python3 in ~/garden-app"})
 check("a row with no answers, from an svrngs before 1.13.0, or not held, or not this computer's: no line",
       [now[n] for n in ("older", "paused", "open", "theirs-open")], ["unsaid"] * 4)
 quick_now = {m["name"]: m.get("now") for m in quick["mine"]}

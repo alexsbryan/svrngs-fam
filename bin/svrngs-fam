@@ -294,7 +294,9 @@ def svrngs_now(row, port):
     the program and the whole folder svrngs read, never by a process title
     the program sets itself or the folder's last name, which two projects
     may share; or another account's, by its name (`account_name`) and with
-    no process, which the token alone approves. Or
+    no process, which the token alone approves. Its `said` names every one
+    svrngs listed, which is what the token approves, as svrngs's home page
+    says them (lent-row.js `answering`). Or
     OTHER when the panel doesn't lend what answers: svrngs gave no token for
     it, so approving it wouldn't be taken (svrngs share.rs `approve`, the
     one decider, which approves another account's program on Linux and
@@ -308,10 +310,11 @@ def svrngs_now(row, port):
         return OTHER
     if kept_back(port) or any(kept_back(port, a["program"], command_of(a["pid"])) for a in programs):
         return OTHER
-    first = answers[0]
+    first, said = answers[0], answered(answers)
     if "pid" not in first:
-        return {**OTHER, "account": account_name(first["account"])}
-    return {"pid": first["pid"], "start": first["start"], "program": text(first["program"]), "folder": text(first.get("folder") or "")}
+        return {**OTHER, "account": account_name(first["account"]), "said": said}
+    return {"pid": first["pid"], "start": first["start"], "program": text(first["program"]),
+            "folder": text(first.get("folder") or ""), "said": said}
 
 
 def account_name(said):

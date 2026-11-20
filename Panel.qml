@@ -212,9 +212,7 @@ Panel {
     if (l.unread !== "") said.push(strings.t("here.nowUnread"))
     else if (now !== null && !now.running) said.push(strings.t("here.nowNothing"))
     else if (now !== null && !now.keep) said.push(strings.t("here.nowOther"))
-    else if (now !== null && now.account !== "") said.push(strings.t("here.nowAccount").arg(now.account))
-    else if (now !== null && now.folder === "") said.push(strings.t("here.nowProgram").arg(now.program))
-    else if (now !== null) said.push(strings.t("here.now").arg(now.program).arg(now.folder))
+    else if (now !== null) said.push(strings.t("here.now").arg(now.said))
     return said.join(" ")
   }
 

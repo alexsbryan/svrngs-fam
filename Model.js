@@ -109,14 +109,17 @@ function heldKey(held) {
 // svrngs before 1.13.0 or where svrngs couldn't read it (the row's
 // `unread`); else whether anything runs there and what Keep sharing it
 // keeps: a program the panel lends, by its process, named by its program
-// and the folder svrngs read, or another account's, by its account alone.
+// and the folder svrngs read, or another account's, by its account alone;
+// and `said`, every program and account svrngs listed there, which its
+// token approves.
 function nowOf(n) {
   if (n === undefined) return null
-  if (n === null) return { running: false, keep: false, program: "", folder: "", pid: null, start: null, account: "" }
+  if (n === null) return { running: false, keep: false, program: "", folder: "", said: "", pid: null, start: null, account: "" }
   var counted = function(v) { return typeof v === "number" && v >= 0 && Math.floor(v) === v }
   var account = typeof n.account === "string" ? n.account : ""
   var process = counted(n.pid) && counted(n.start)
-  return { running: true, keep: process || account !== "", program: n.program || "", folder: n.folder || "", pid: process ? n.pid : null, start: process ? n.start : null, account: account }
+  var said = typeof n.said === "string" ? n.said : ""
+  return { running: true, keep: process || account !== "", program: n.program || "", folder: n.folder || "", said: said, pid: process ? n.pid : null, start: process ? n.start : null, account: account }
 }
 
 // Whether a lend of yours offers Keep sharing it: svrngs listed it with a
