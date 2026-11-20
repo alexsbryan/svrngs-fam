@@ -44,27 +44,36 @@ ShellRoot {
       listeners: [{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77 }]
     })
 
-    // Your lends svrngs holds, as the helper reads them: why, from svrngs's
-    // groups; what answers on each port now, from this computer.
+    // Your lends svrngs holds, as the helper gives them: each held row with
+    // why, the token svrngs listed it with, and `now`, what svrngs read
+    // answering on its port (the helper's `svrngs_now`), as svrngs 1.13.0
+    // lists them; "unread" as an svrngs before it does, with neither.
     readonly property var kept: ({
       svrngs: "running",
       groups: running.groups,
       mine: [
-        { name: "garden", port: 3000, groups: ["g1"], now: { pid: 10, start: 20, program: "puma", name: "my-garden" } },
-        { name: "quiet", port: 3002, groups: ["g1"], now: null },
-        { name: "theirs", port: 3003, groups: ["g1"], now: { pid: null, start: null, program: "", name: "" } },
-        { name: "odd", port: 3004, groups: ["g1"], now: { pid: 11, start: 21, program: "python3", name: "odd" } },
-        { name: "shaped", port: 3006, groups: ["g1"], now: { pid: 13, start: 23, program: "python3", name: "shaped" } },
+        { name: "garden", port: 3000, groups: ["g1"] },
+        { name: "quiet", port: 3002, groups: ["g1"] },
+        { name: "theirs", port: 3003, groups: ["g1"] },
+        { name: "odd", port: 3004, groups: ["g1"] },
+        { name: "shaped", port: 3006, groups: ["g1"] },
         { name: "unread", port: 3005, groups: ["g1"] },
-        { name: "notes", port: 3001, groups: ["g1"], now: { pid: 12, start: 22, program: "python3", name: "notes" } }
+        { name: "untold", port: 3007, groups: ["g1"] },
+        { name: "notes", port: 3001, groups: ["g1"] }
       ],
       lends: { g1: { lent: [
-        { person: "LittleMac", name: "garden", kind: "puma", origin: "http://k1.localhost:41097/", held: "unapproved" },
-        { person: "LittleMac", name: "quiet", kind: "puma", origin: "http://k2.localhost:41097/", held: "another" },
-        { person: "LittleMac", name: "theirs", kind: "puma", origin: "http://k3.localhost:41097/", held: "unjudged" },
-        { person: "LittleMac", name: "odd", kind: "python3", origin: "http://k4.localhost:41097/", held: "unknown" },
-        { person: "LittleMac", name: "shaped", kind: "python3", origin: "http://k6.localhost:41097/", held: "paused" },
+        { person: "LittleMac", name: "garden", kind: "puma", origin: "http://k1.localhost:41097/", held: "unapproved", token: "t1",
+          now: { pid: 10, start: 20, program: "puma", name: "my-garden" } },
+        { person: "LittleMac", name: "quiet", kind: "puma", origin: "http://k2.localhost:41097/", held: "another", token: null, now: null },
+        { person: "LittleMac", name: "theirs", kind: "puma", origin: "http://k3.localhost:41097/", held: "unjudged", token: "t3",
+          now: { pid: null, start: null, program: "", name: "" } },
+        { person: "LittleMac", name: "odd", kind: "python3", origin: "http://k4.localhost:41097/", held: "unknown", token: "t4",
+          now: { pid: 11, start: 21, program: "python3", name: "odd" } },
+        { person: "LittleMac", name: "shaped", kind: "python3", origin: "http://k6.localhost:41097/", held: "paused", token: "t6",
+          now: { pid: 13, start: 23, program: "python3", name: "shaped" } },
         { person: "LittleMac", name: "unread", kind: "python3", origin: "http://k5.localhost:41097/", held: "unapproved" },
+        { person: "LittleMac", name: "untold", kind: "python3", origin: "http://k7.localhost:41097/", held: "another", token: null,
+          now: { pid: 14, start: 24, program: "python3", name: "untold" } },
         { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
       ], unanswered: [] } },
       listeners: []
@@ -143,7 +152,7 @@ ShellRoot {
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
       check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77 }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
-            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", now: null }]))
+            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", token: "", now: null }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
       check("a group's lends from others, not yours, each running or not", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label + ":" + l.answering })),
             JSON.stringify(["Fedora:abc123:true", "Fedora:fff999:false"]))
@@ -162,8 +171,12 @@ ShellRoot {
       show(held)
       check("a friend's lend held for a reason the panel doesn't know can't be opened either",
             Model.friendsLends(fam.answer, barPanel.groups[0])[0].answering, false)
+      held.lends.g1.lent[0].held = "unapproved"
+      show(held)
+      check("nor one held until its lender chooses what it shares",
+            Model.friendsLends(fam.answer, barPanel.groups[0])[0].answering, false)
 
-      console.log("a lend of yours svrngs holds: why, what answers now, Keep sharing it")
+      console.log("a lend of yours svrngs holds: why, what svrngs read on its port, Keep sharing it")
       show(kept)
       check("its note says why, for any reason, never where it's lent", JSON.stringify(barPanel.lent.map(function(l) { return barPanel.lentNote(l) })), JSON.stringify([
         "Closed until you choose what it shares",
@@ -172,17 +185,27 @@ ShellRoot {
         "Closed by svrngs. Its home page says why",
         "Closed by svrngs. Its home page says why",
         "Closed until you choose what it shares",
+        "Closed: what answers on its port isn't what you chose to share",
         "Not running now: start it, and your people can open it"]))
-      check("under it, what answers on its port now", JSON.stringify(barPanel.lent.map(function(l) { return barPanel.nowWords(l) })), JSON.stringify([
+      check("under it, what svrngs read answering on its port", JSON.stringify(barPanel.lent.map(function(l) { return barPanel.nowWords(l) })), JSON.stringify([
         "svrngs now keeps each share to the program you approve. Now answering: puma in my-garden.",
         "Its program isn't running. Start it, then keep sharing it here.",
         "What answers on its port now can't be shared from here.",
         "", "",
         "svrngs now keeps each share to the program you approve.",
+        "Now answering: python3 in untold.",
         ""]))
-      check("Keep sharing it only where a program the panel lends answers, held for a reason it knows",
+      check("each keeps the token its row was listed with", JSON.stringify(barPanel.lent.map(function(l) { return l.token })),
+            JSON.stringify(["t1", "", "t3", "t4", "t6", "", "", ""]))
+      check("Keep sharing it only where svrngs listed a token and read a program the panel lends, held for a reason it knows",
             JSON.stringify(barPanel.stops.filter(function(s) { return /^(stop|keep):/.test(s) })),
-            JSON.stringify(["stop:garden", "keep:garden", "stop:quiet", "stop:theirs", "stop:odd", "stop:shaped", "stop:unread", "stop:notes"]))
+            JSON.stringify(["stop:garden", "keep:garden", "stop:quiet", "stop:theirs", "stop:odd", "stop:shaped", "stop:unread", "stop:untold", "stop:notes"]))
+      var twice = JSON.parse(JSON.stringify(kept))
+      twice.groups = running.groups.slice(0, 2).map(function(g) { return Object.assign({}, g, { person: "LittleMac" }) })
+      twice.lends.g2 = { lent: [Object.assign({}, kept.lends.g1.lent[0], { token: "t9", now: { pid: 99, start: 98, program: "puma", name: "my-garden" } })], unanswered: [] }
+      show(twice)
+      check("lent to two groups: the reason, token and process all come from one row",
+            JSON.stringify(Model.approveArgs(barPanel.lent[0])), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
 
       console.log("an offer's name is one no other port's lend has")
       var named = JSON.parse(JSON.stringify(running))
@@ -230,10 +253,41 @@ ShellRoot {
       onTriggered: {
         harness.check("asked to read", harness.fam.wanted, true)
         harness.check("read once on open", harness.fam.reads, harness.readsWhenClosed + 1)
+        harness.ports()
         barPanel.close()
         harness.check("closing stops asking", harness.fam.wanted, false)
+        harness.show(harness.here(15))
+        harness.check("closed, a change on a lend's port asks nothing", harness.fam.fullAsked - harness.fullBefore, 0)
         harness.actions()
       }
+    }
+
+    // A read of this computer alone, as the helper's `--here` gives it, with
+    // process `pid` listening on the lent port of notes; null for none.
+    function here(pid) {
+      return { svrngs: "running", groups: running.groups, listeners: [],
+               mine: [{ name: "notes", port: 3001, groups: ["g1"], now: pid === null ? null : { pid: pid, start: pid + 1, program: "python3", name: "notes" } }] }
+    }
+
+    property int fullBefore: 0
+
+    // While the panel is open, what listens on a lend's port changing asks
+    // svrngs again; the same again, or svrngs's own answer, asks nothing.
+    function ports() {
+      console.log("what listens on a lend's port changes while the panel is open")
+      show(here(null))
+      var before = fam.fullAsked
+      show(here(5))
+      check("svrngs is asked again", fam.fullAsked - before, 1)
+      before = fam.fullAsked
+      show(here(5))
+      check("the same again asks nothing", fam.fullAsked - before, 0)
+      before = fam.fullAsked
+      var asked = here(6)
+      asked.lends = running.lends
+      show(asked)
+      check("nor does svrngs's own answer", fam.fullAsked - before, 0)
+      fullBefore = fam.fullAsked
     }
 
     function actions() {
@@ -286,13 +340,15 @@ ShellRoot {
     }
 
     function afterOpen() {
-      console.log("Keep sharing it: one press, the process its line shows")
+      console.log("Keep sharing it: one press, what its line shows, by its row's token")
       show(kept)
       barPanel.activate("keep:quiet")
       check("nothing runs where nothing answers", fam.doing, "")
+      barPanel.activate("keep:untold")
+      check("nor where svrngs listed no token", fam.doing, "")
       barPanel.activate("keep:garden")
-      check("svrngs is asked to approve the process shown, by its pid and start, and nothing else",
-            JSON.stringify(fam.lastAsked), JSON.stringify(["approve", "garden", "--pid", "10@20"]))
+      check("svrngs is asked to approve what the line shows: its row's token, the process by its pid and start, nothing else",
+            JSON.stringify(fam.lastAsked), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
       check("it runs", fam.doing, "keep:garden")
       settle.then = harness.finish
       settle.start()

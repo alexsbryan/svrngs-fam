@@ -66,7 +66,10 @@ function lent(answer) {
   var names = {}
   groups(answer).forEach(function(g) { names[g.id] = g.name })
   // Whether each is running, and whether svrngs holds it closed, as svrngs
-  // lists it to its own groups.
+  // lists it to its own groups. A held one's reason, the token it was
+  // listed with and what svrngs read answering on its port are taken from
+  // one row, the first that says it is held: approving sends back what that
+  // row showed.
   var answering = {}
   var held = {}
   groups(answer).forEach(function(g) {
@@ -74,17 +77,19 @@ function lent(answer) {
     ;((lends && lends.lent) || []).forEach(function(l) {
       if (l.person !== g.person) return
       if (l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
-      if (l.held) held[l.name] = l.held
+      if (l.held && !held[l.name]) held[l.name] = l
     })
   })
   return (answer.mine || []).map(function(m) {
+    var row = held[m.name] || {}
     return {
       name: m.name,
       port: m.port,
       groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" }),
       answering: answering[m.name] === false ? false : true,
-      held: held[m.name] || "",
-      now: nowOf(m)
+      held: row.held || "",
+      token: typeof row.token === "string" ? row.token : "",
+      now: nowOf(row.now)
     }
   })
 }
@@ -98,27 +103,41 @@ function heldKey(held) {
   return Object.prototype.hasOwnProperty.call(HELD, held) ? HELD[held] : "here.heldUnknown"
 }
 
-// What answers on a lend's port now, from the helper's read of this
-// computer: null when it wasn't read; else whether anything runs there and,
-// when it is a program the panel lends, the process Keep sharing it names.
-function nowOf(m) {
-  if (!m || m.now === undefined) return null
-  if (m.now === null) return { running: false, keep: false, program: "", name: "", pid: null, start: null }
-  var n = m.now
+// What answers on a held lend's port, as svrngs read it for the lend's row
+// (the helper's `svrngs_now`): null when the row says nothing, from an
+// svrngs before 1.13.0; else whether anything runs there and, when it is a
+// program the panel lends, the process Keep sharing it names.
+function nowOf(n) {
+  if (n === undefined) return null
+  if (n === null) return { running: false, keep: false, program: "", name: "", pid: null, start: null }
   var counted = function(v) { return typeof v === "number" && v >= 0 && Math.floor(v) === v }
   return { running: true, keep: counted(n.pid) && counted(n.start), program: n.program || "", name: n.name || "", pid: n.pid, start: n.start }
 }
 
 // Whether a lend of yours offers Keep sharing it: svrngs holds it for a
-// reason the panel knows, and a program the panel lends answers there now.
+// reason the panel knows, listed it with a token, and read a program the
+// panel lends answering there.
 function keepable(l) {
-  return !!l && l.held !== "" && heldKey(l.held) !== "here.heldUnknown" && l.now !== null && l.now.keep === true
+  return !!l && l.held !== "" && heldKey(l.held) !== "here.heldUnknown" && l.token !== "" && l.now !== null && l.now.keep === true
 }
 
-// The helper's argv to keep sharing `l`, to the process its line shows.
-// svrngs approves that process and changes nothing else of the share.
+// The helper's argv to keep sharing `l` to what its line shows: the token
+// its row was listed with, and the process the line names. svrngs approves
+// that only while it is still what answers, and changes nothing else.
 function approveArgs(l) {
-  return ["approve", l.name, "--pid", processOf(l.now)]
+  return ["approve", l.name, "--token", l.token, "--pid", processOf(l.now)]
+}
+
+// What listens on each of this computer's lends' ports, by the helper's own
+// read of this computer (its `answering_now`), as one string; "" when this
+// computer wasn't read. A change while the panel is open asks svrngs again
+// (Service.qml), so what a held lend's line shows is svrngs's read of now.
+function portsKey(answer) {
+  if (!running(answer) || !answer.listeners) return ""
+  return (answer.mine || []).map(function(m) {
+    var n = m.now
+    return m.name + "=" + (n === undefined ? "?" : n === null ? "-" : n.pid === null ? "x" : n.pid + "@" + n.start)
+  }).join(",")
 }
 
 // A process as svrngs is told it: its pid and its start, so a pid that now

@@ -188,7 +188,8 @@ Panel {
 
   function stop(name) { fam.act("stop:" + name, ["unshare", name]) }
 
-  // Keep sharing a held lend, to the process its line shows answering now.
+  // Keep sharing a held lend, to what its line shows answering: the process
+  // svrngs read for its row, sent with the token the row was listed with.
   function keep(l) {
     if (Model.keepable(l)) fam.act("keep:" + l.name, Model.approveArgs(l))
   }
@@ -201,9 +202,9 @@ Panel {
     return l.groups.length > 0 ? strings.t("here.lentTo").arg(l.groups.join(", ")) : strings.t("here.lentNowhere")
   }
 
-  // Under a held lend's line: what answers on its port now, which Keep
-  // sharing it would keep sharing. Nothing for a reason the panel doesn't
-  // know, since it offers nothing to press for one.
+  // Under a held lend's line: what svrngs read answering on its port, which
+  // Keep sharing it would keep sharing. Nothing for a reason the panel
+  // doesn't know, since it offers nothing to press for one.
   function nowWords(l) {
     if (l.held === "" || Model.heldKey(l.held) === "here.heldUnknown") return ""
     var said = l.held === "unapproved" ? [strings.t("here.approveWhy")] : []

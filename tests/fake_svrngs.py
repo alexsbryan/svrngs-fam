@@ -1,10 +1,13 @@
 """A stand-in for svrngs's API, as the helper meets it: a loopback HTTP server
-that answers `/v1/groups` and `/v1/lends` only with the right bearer token,
-and refuses any request carrying `Origin` or `Sec-Fetch-Site`, as svrngs does
-(svrngs api.rs:199-210). `mode` makes it answer the ways svrngs can go wrong.
+that answers `/v1/groups`, `/v1/lends` and `POST /v1/lends/<name>/approve`
+only with the right bearer token, and refuses any request carrying `Origin`
+or `Sec-Fetch-Site`, as svrngs does (svrngs api.rs:199-210). `mode` makes it
+answer the ways svrngs can go wrong, and "old" as an svrngs from before
+approving, which has no approve route (surface.rs `router` at v1.12.2).
 """
 
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +18,26 @@ GROUPS = {
     "groups": [
         {"id": "a" * 64, "name": "WorkingGroup", "person": "LittleMac", "left": False},
         {"id": "b" * 64, "name": "<img src=x>" + "x" * 300, "person": "Ana", "left": False},
-    ]
+    ],
+    "key": "c" * 64,
 }
+
+U32, U64 = 2**32 - 1, 2**64 - 1
+
+
+def approving(body):
+    """The body as svrngs's approve route takes it (surface.rs `Approving`,
+    `#[serde(deny_unknown_fields)]`: `token` a string, `pid` a u32 and
+    `start` a u64, each or both null or absent), or None, which axum's
+    `Json` answers 422 in plain text."""
+    try:
+        asked = json.loads(body)
+    except ValueError:
+        return None
+    number = lambda v, most: v is None or (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= most)
+    fits = (isinstance(asked, dict) and set(asked) <= {"token", "pid", "start"} and isinstance(asked.get("token"), str)
+            and number(asked.get("pid"), U32) and number(asked.get("start"), U64))
+    return asked if fits else None
 LENDS = {
     "lent": [
         {"person": "Fedora", "name": "deepseek-flash", "kind": "spot", "origin": "http://abc.localhost:41097/", "using": 0, "limit": None}
@@ -36,6 +57,11 @@ class Fake:
         # Seconds each /v1/lends takes, as a lender slow to answer makes it.
         self.delay = 0
         self.lends = LENDS
+        # This computer's lends as approving reads them: by name, its port,
+        # the token what answers there now is listed with, the processes
+        # holding it (pid: start) and what svrngs shows of them.
+        self.ports = {}
+        self.approved = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -91,7 +117,35 @@ class Fake:
                     asked = json.loads(body or b"{}")
                     label = asked.get("lend") or "svrngs"
                     return self.answer(200, {"open": f"http://{label}.localhost:{fake.port}/svrngs-open?code=one-time-secret"})
-                return self.answer(404, {"error": "no such route"})
+                named = re.fullmatch(r"/v1/lends/([^/?]+)/approve", self.path)
+                if named and fake.mode != "old":
+                    return self.approve(named.group(1), body)
+                # axum's own answer to a route it doesn't have: 404, no body.
+                return self.answer(404, b"", "text/plain")
+
+            def approve(self, name, body):
+                """svrngs surface.rs `approve` and share.rs `approve`, in
+                their order: the body, the lend, the process chosen (by
+                `pid` and `start` together, or none), then the token."""
+                if self.headers.get("Content-Type") != "application/json":
+                    return self.answer(415, b"Expected request with `Content-Type: application/json`", "text/plain")
+                asked = approving(body)
+                if asked is None:
+                    return self.answer(422, b"Failed to deserialize the JSON body into the target type", "text/plain")
+                closed = lambda words: self.answer(403, {"error": words, "kind": "closed"})
+                lend = fake.ports.get(name)
+                if lend is None:
+                    return closed(f"nothing is shared from a port here by the name {name}")
+                port, pid, start = lend["port"], asked.get("pid"), asked.get("start")
+                if pid is not None and start is not None:
+                    if lend["processes"].get(pid, start) != start:
+                        return closed(f"svrngs can't share port {port}: that program stopped; choose it again.")
+                    if pid not in lend["processes"]:
+                        return closed(f"svrngs can't share port {port}: another program also listens on port {port}. Stop it, or choose that one, then share it again.")
+                if asked["token"] != lend["token"]:
+                    return closed(f"svrngs can't share port {port}: what answers on port {port} changed; choose it again.")
+                fake.approved.append(name)
+                return self.answer(200, {"name": name, "answers": lend["answers"]})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]

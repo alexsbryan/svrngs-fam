@@ -14,10 +14,11 @@ import "Model.js" as Model
 //
 // How much a read asks: SHORT is svrngs's groups alone; HERE adds what
 // listens on this computer, no network; FULL adds what every group lends,
-// which asks each of its people's computers. FULL runs as the panel opens
-// and after an action of its own, as the home page reads on opening, never
-// on a timer; HERE every 5 s while it is open (svrn-docs OMARCHY_PLUGIN.md;
-// the study, "svrngs panel at scale").
+// which asks each of its people's computers. FULL runs as the panel opens,
+// after an action of its own, as the home page reads on opening, and when a
+// HERE read finds what listens on a lend's port changed, never on a timer;
+// HERE every 5 s while it is open (svrn-docs OMARCHY_PLUGIN.md; the study,
+// "svrngs panel at scale").
 Item {
   id: root
 
@@ -45,6 +46,10 @@ Item {
 
   property bool _again: false
   property int _againDepth: 0
+  // What listened on this computer's lends' ports at the last read of it.
+  property string _ports: ""
+  // FULL reads asked, for the logic test.
+  property int fullAsked: 0
 
   // Friends' lends that answer as models, asked when the panel opens and
   // again only when which lends there are changes. What each lend answered
@@ -102,6 +107,7 @@ Item {
 
   function refresh(depth) {
     var d = typeof depth === "boolean" ? (depth ? full : short) : depth
+    if (d === full) fullAsked += 1
     if (helper.running) {
       _again = true
       _againDepth = Math.max(_againDepth, d)
@@ -114,10 +120,17 @@ Item {
   function apply(raw) {
     reads += 1
     var next = Model.parse(raw)
+    var asked = !!next.lends
     // A read that did not ask the groups keeps what the last one heard.
     if (next.svrngs === "running" && !next.lends && answer && answer.svrngs === "running" && answer.lends)
       next.lends = answer.lends
     answer = next
+    // What listens on a lend's port changed since the last read of this
+    // computer: svrngs is asked again, so a held lend's line, and the token
+    // Keep sharing it sends, are svrngs's read of what answers now.
+    var ports = Model.portsKey(answer)
+    if (wanted && !asked && ports !== "" && _ports !== "" && ports !== _ports) refresh(full)
+    if (ports !== "") _ports = ports
     var key = Model.lendsKey(answer)
     if (wanted && answer.lends && key !== _modelsKey) {
       _modelsKey = key
