@@ -67,19 +67,19 @@ ShellRoot {
       ],
       lends: { g1: { lent: [
         { person: "LittleMac", name: "garden", kind: "puma", origin: "http://k1.localhost:41097/", held: "unapproved", token: "t1",
-          now: { pid: 10, start: 20, program: "puma", name: "my-garden" } },
+          now: { pid: 10, start: 20, program: "puma", folder: "~/my-garden" } },
         { person: "LittleMac", name: "quiet", kind: "puma", origin: "http://k2.localhost:41097/", held: "another", token: null, now: null },
         { person: "LittleMac", name: "theirs", kind: "puma", origin: "http://k3.localhost:41097/", held: "unjudged", token: "t3",
-          now: { pid: null, start: null, program: "", name: "" } },
+          now: { pid: null, start: null, program: "", folder: "" } },
         { person: "LittleMac", name: "odd", kind: "python3", origin: "http://k4.localhost:41097/", held: "unknown", token: "t4",
-          now: { pid: 11, start: 21, program: "python3", name: "odd" } },
+          now: { pid: 11, start: 21, program: "python3", folder: "~/work/odd" } },
         { person: "LittleMac", name: "shaped", kind: "python3", origin: "http://k6.localhost:41097/", held: "paused", token: "t6",
-          now: { pid: 13, start: 23, program: "python3", name: "shaped" } },
+          now: { pid: 13, start: 23, program: "python3", folder: "~/tmp/odd" } },
         { person: "LittleMac", name: "unread", kind: "python3", origin: "http://k5.localhost:41097/", held: "unapproved" },
         { person: "LittleMac", name: "untold", kind: "python3", origin: "http://k7.localhost:41097/", held: "another", token: null,
-          now: { pid: 14, start: 24, program: "python3", name: "untold" } },
+          now: { pid: 14, start: 24, program: "python3", folder: "" } },
         { person: "LittleMac", name: "account", kind: "python3", origin: "http://k8.localhost:41097/", held: "another", token: "t8",
-          now: { pid: null, start: null, program: "", name: "", account: "1001" } },
+          now: { pid: null, start: null, program: "", folder: "", account: "1001" } },
         { person: "LittleMac", name: "lost", kind: "python3", origin: "http://k9.localhost:41097/", held: "another", token: null,
           unread: "failed" },
         { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
@@ -198,13 +198,13 @@ ShellRoot {
         "Closed: what answers on its port isn't what you chose to share",
         "Not running now: start it, and your people can open it"]))
       check("under it, what svrngs read answering on its port", JSON.stringify(barPanel.lent.map(function(l) { return barPanel.nowWords(l) })), JSON.stringify([
-        "svrngs now keeps each share to the program you approve. Now answering: puma in my-garden.",
+        "svrngs now keeps each share to the program you approve. Now answering: puma in ~/my-garden.",
         "Its program isn't running. Start it, then keep sharing it here.",
         "What answers on its port now can't be shared from here.",
-        "Now answering: python3 in odd.",
-        "Now answering: python3 in shaped.",
+        "Now answering: python3 in ~/work/odd.",
+        "Now answering: python3 in ~/tmp/odd.",
         "svrngs now keeps each share to the program you approve.",
-        "Now answering: python3 in untold.",
+        "Now answering: python3.",
         "Now answering: a program of the account 1001.",
         "svrngs couldn't read what answers on its port. Open this panel again to look again.",
         ""]))
@@ -218,7 +218,7 @@ ShellRoot {
             JSON.stringify(Model.approveArgs(barPanel.lent[7])), JSON.stringify(["approve", "account", "--token", "t8"]))
       var twice = JSON.parse(JSON.stringify(kept))
       twice.groups = running.groups.slice(0, 2).map(function(g) { return Object.assign({}, g, { person: "LittleMac" }) })
-      twice.lends.g2 = { lent: [Object.assign({}, kept.lends.g1.lent[0], { token: "t9", now: { pid: 99, start: 98, program: "puma", name: "my-garden" } })], unanswered: [] }
+      twice.lends.g2 = { lent: [Object.assign({}, kept.lends.g1.lent[0], { token: "t9", now: { pid: 99, start: 98, program: "puma", folder: "~/my-garden" } })], unanswered: [] }
       show(twice)
       check("lent to two groups: the reason, token and process all come from one row",
             JSON.stringify(Model.approveArgs(barPanel.lent[0])), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
@@ -282,7 +282,7 @@ ShellRoot {
     // process `pid` listening on the lent port of notes; null for none.
     function here(pid) {
       return { svrngs: "running", groups: running.groups, listeners: [],
-               mine: [{ name: "notes", port: 3001, groups: ["g1"], now: pid === null ? null : { pid: pid, start: pid + 1, program: "python3", name: "notes" } }] }
+               mine: [{ name: "notes", port: 3001, groups: ["g1"], now: pid === null ? null : { pid: pid, start: pid + 1, program: "python3", folder: "~/notes" } }] }
     }
 
     property int fullBefore: 0

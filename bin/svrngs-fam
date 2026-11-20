@@ -37,6 +37,7 @@ import hashlib
 import http.client
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -281,7 +282,7 @@ def answering_now(listed, port):
 
 # What answers on a port, as the panel shows what it doesn't lend: no pid
 # or start, so nothing for Keep sharing it to name.
-OTHER = {"pid": None, "start": None, "program": "", "name": ""}
+OTHER = {"pid": None, "start": None, "program": "", "folder": ""}
 
 
 def svrngs_now(row, port):
@@ -289,9 +290,11 @@ def svrngs_now(row, port):
     holds, as svrngs read it for the lend's row (svrngs door.rs `offered`),
     the read its token names: what its line shows, and what Keep sharing it
     approves. None when nothing answers there: svrngs named nothing and its
-    port took no connection. Else what svrngs names first: a program, as
-    `lendable` describes it while that process runs, or another account's,
-    by its account and with no process, which the token alone approves. Or
+    port took no connection. Else what svrngs names first: a program, by
+    the program and the whole folder svrngs read, never by a process title
+    the program sets itself or the folder's last name, which two projects
+    may share; or another account's, by its name (`account_name`) and with
+    no process, which the token alone approves. Or
     OTHER when the panel doesn't lend what answers: svrngs gave no token for
     it, so approving it wouldn't be taken (svrngs share.rs `approve`, the
     one decider, which approves another account's program on Linux and
@@ -307,13 +310,18 @@ def svrngs_now(row, port):
         return OTHER
     first = answers[0]
     if "pid" not in first:
-        return {**OTHER, "account": first["account"]}
-    if started(first["pid"]) == first["start"]:
-        program, offered = describe(first["pid"], command_of(first["pid"]) or first["program"])
-    else:
-        # Gone since svrngs read it, which approving it then says.
-        program, offered = first["program"], lend_name(Path(first["folder"] or "").name, first["program"])
-    return {"pid": first["pid"], "start": first["start"], "program": text(program), "name": offered}
+        return {**OTHER, "account": account_name(first["account"])}
+    return {"pid": first["pid"], "start": first["start"], "program": text(first["program"]), "folder": text(first.get("folder") or "")}
+
+
+def account_name(said):
+    """Another account as svrngs names it, a uid on Linux, said by its name
+    on this computer (pwd): "root" for 0. The number, as svrngs gave it,
+    where this computer has no account of it."""
+    try:
+        return text(pwd.getpwuid(int(said)).pw_name)
+    except (KeyError, OverflowError, ValueError):
+        return text(said)
 
 
 def command_of(pid):
@@ -576,8 +584,7 @@ def keep_sharing(name, shown, process):
     socket there is that process's or a child's, and changes nothing else
     of the share (svrngs surface.rs `approve`, share.rs `approve`). A pid
     and its start are sent together or not at all: svrngs refuses half of
-    one. Asked of the API, since `svrngs approve` takes no token (cli.rs
-    `approve`), so it would approve what answers then, shown or not."""
+    one. Asked of the API with the token, as svrngs's home page asks it."""
     held, refused = connected()
     if refused:
         return refused
@@ -607,7 +614,8 @@ def keep_sharing(name, shown, process):
 def answered(answers):
     """What answers on a port, as `svrngs approve` says it (cli.rs
     `what_answers`, lend.rs `Answer`): "python3 in ~/garden", or "a program
-    of the account 1001", "and" between them."""
+    of the account root", another account by its name (`account_name`),
+    "and" between them."""
     said = []
     for a in answers if isinstance(answers, list) else []:
         if not isinstance(a, dict):
@@ -616,7 +624,7 @@ def answered(answers):
             folder = a.get("folder")
             said.append(text(a["program"]) + (f" in {text(folder)}" if isinstance(folder, str) else ""))
         elif isinstance(a.get("account"), str):
-            said.append(f"a program of the account {text(a['account'])}")
+            said.append(f"a program of the account {account_name(a['account'])}")
     return " and ".join(said) if said else "what answers on its port"
 
 
