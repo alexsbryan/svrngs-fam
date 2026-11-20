@@ -46,6 +46,8 @@
   "here.nowProgram": "Now answering: %1.",
   "here.nowNothing": "Its program isn't running. Start it, then keep sharing it here.",
   "here.nowOther": "What answers on its port now can't be shared from here.",
+  "here.nowAccount": "Now answering: a program of the account %1.",
+  "here.nowUnread": "svrngs couldn't read what answers on its port. Open this panel again to look again.",
   "action.keep": "Keep sharing it",
   "action.invite": "Invite",
   "action.makeLink": "Make link",

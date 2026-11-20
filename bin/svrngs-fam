@@ -10,11 +10,11 @@ Verbs:
                                   lends and what listens on this computer,
                                   --here only what listens on this computer
   share <port> <group> <name> [--program <kind>] [--pid <pid>@<start>] [--password-stdin]
-  approve <name> --token <token> --pid <pid>@<start>
+  approve <name> --token <token> [--pid <pid>@<start>]
                                   keeps sharing a held share to what its row
                                   showed answering on its port: the token
                                   the row was listed with, and the process
-                                  its line named
+                                  its line named, if it named one
   unshare <name> [--group <group>]
   models [--skip <label,...>]     friends' lends that answer OpenAI's
                                   v1/models, each with the address to use;
@@ -289,20 +289,25 @@ def svrngs_now(row, port):
     holds, as svrngs read it for the lend's row (svrngs door.rs `offered`),
     the read its token names: what its line shows, and what Keep sharing it
     approves. None when nothing answers there: svrngs named nothing and its
-    port took no connection. Else the first program svrngs names, as
-    `lendable` describes it while that process runs; or OTHER when the
-    panel doesn't lend what answers: another account's program, or one
-    svrngs couldn't name, one on the deny list, or one svrngs gave no token
-    for, as when it listens only on another address (share.rs `approve`)."""
+    port took no connection. Else what svrngs names first: a program, as
+    `lendable` describes it while that process runs, or another account's,
+    by its account and with no process, which the token alone approves. Or
+    OTHER when the panel doesn't lend what answers: svrngs gave no token for
+    it, so approving it wouldn't be taken (svrngs share.rs `approve`, the
+    one decider, which approves another account's program on Linux and
+    refuses one on a Mac); a program on the deny list; or an answer svrngs
+    couldn't name."""
     answers = row["answers"]
     if not answers:
         return None if row.get("answering") is False else OTHER
     programs = [a for a in answers if "pid" in a]
-    if len(programs) < len(answers) or row["token"] is None:
+    if row["token"] is None or any("pid" not in a and not a["account"] for a in answers):
         return OTHER
-    if any(kept_back(port, a["program"], command_of(a["pid"])) for a in programs):
+    if kept_back(port) or any(kept_back(port, a["program"], command_of(a["pid"])) for a in programs):
         return OTHER
-    first = programs[0]
+    first = answers[0]
+    if "pid" not in first:
+        return {**OTHER, "account": first["account"]}
     if started(first["pid"]) == first["start"]:
         program, offered = describe(first["pid"], command_of(first["pid"]) or first["program"])
     else:
@@ -453,6 +458,23 @@ def answers_of(value):
     return found
 
 
+# Why svrngs couldn't read what answers on a held lend's port (svrngs
+# uid.rs `Unread`, a closed set): it has no reader on this system, or the
+# read failed. svrngs says it in its lender's own list alone, with no
+# `answers`.
+UNREAD = ("no_reader", "failed")
+
+
+def unread_of(value):
+    """A row's `unread` as the panel reads it: None only when svrngs says
+    nothing of it; a reason this helper doesn't know, from a newer svrngs,
+    is "unknown", and unread all the same."""
+    if value is None:
+        return None
+    why = value.get("why") if isinstance(value, dict) else None
+    return why if why in UNREAD else "unknown"
+
+
 def held_of(value):
     """A lend's `held` as the panel reads it: None only when svrngs says
     nothing holds it. A value this helper doesn't know, from a newer svrngs,
@@ -484,6 +506,9 @@ def lends_of(at, secret, namespace):
                 # For a held lend of this computer's: what svrngs read on its
                 # port, and the token approving that sends back.
                 "answers": answers_of(l.get("answers")),
+                # Why svrngs couldn't read what answers there, said apart
+                # from nothing answering (svrngs uid.rs `Unread`).
+                "unread": unread_of(l.get("unread")),
                 "token": l["token"] if isinstance(l.get("token"), str) and LISTED_WITH.fullmatch(l["token"]) else None,
                 # An app the group's folder carries, served by every computer
                 # in it: listed once, as the group's, not one person's.
@@ -545,18 +570,22 @@ def run_svrngs(args, stdin="", raw=False, older=()):
 def keep_sharing(name, shown, process):
     """Keep sharing the lend `name` to what its row showed answering on its
     port: `shown`, the token the row was listed with, and the process its
-    line named, `<pid>@<start>`. svrngs approves that only while what
-    answers is what the row listed and every socket there is that process's
-    or a child's, and changes nothing else of the share (svrngs surface.rs
-    `approve`, share.rs `approve`). Asked of the API, since `svrngs
-    approve` takes no token (cli.rs `approve`), so it would approve what
-    answers then, shown or not."""
+    line named, `<pid>@<start>`, or None where it named another account's
+    program, which the token alone approves. svrngs approves that only
+    while what answers is what the row listed and, given a process, every
+    socket there is that process's or a child's, and changes nothing else
+    of the share (svrngs surface.rs `approve`, share.rs `approve`). A pid
+    and its start are sent together or not at all: svrngs refuses half of
+    one. Asked of the API, since `svrngs approve` takes no token (cli.rs
+    `approve`), so it would approve what answers then, shown or not."""
     held, refused = connected()
     if refused:
         return refused
     at, secret = held
-    pid, start = (int(n) for n in process.split("@"))
-    asked = {"token": shown, "pid": pid, "start": start}
+    asked = {"token": shown}
+    if process is not None:
+        pid, start = (int(n) for n in process.split("@"))
+        asked.update(pid=pid, start=start)
     try:
         status, answer = request(at, secret, "POST", f"/v1/lends/{name}/approve", asked)
     except Stopped:
@@ -918,11 +947,11 @@ def main(argv):
         at = rest.index("--token") + 1 if "--token" in rest else len(rest)
         if at >= len(rest) or not LISTED_WITH.fullmatch(rest[at]):
             return {"ok": False, "said": "approve wants the token its row was listed with: --token <token>"}
-        if "--pid" not in rest:
-            return {"ok": False, "said": "approve wants the process to keep sharing: --pid <pid>@<start>"}
-        pid, refused = process_of(rest)
-        if refused:
-            return refused
+        pid = None
+        if "--pid" in rest:
+            pid, refused = process_of(rest)
+            if refused:
+                return refused
         return keep_sharing(rest[0], rest[at], pid)
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]

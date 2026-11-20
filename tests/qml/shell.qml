@@ -47,7 +47,9 @@ ShellRoot {
     // Your lends svrngs holds, as the helper gives them: each held row with
     // why, the token svrngs listed it with, and `now`, what svrngs read
     // answering on its port (the helper's `svrngs_now`), as svrngs 1.13.0
-    // lists them; "unread" as an svrngs before it does, with neither.
+    // lists them; "unread" as an svrngs before it does, with neither;
+    // "account" another account's program svrngs listed a token for; "lost"
+    // a port svrngs couldn't read, its reason in `unread`.
     readonly property var kept: ({
       svrngs: "running",
       groups: running.groups,
@@ -59,6 +61,8 @@ ShellRoot {
         { name: "shaped", port: 3006, groups: ["g1"] },
         { name: "unread", port: 3005, groups: ["g1"] },
         { name: "untold", port: 3007, groups: ["g1"] },
+        { name: "account", port: 3008, groups: ["g1"] },
+        { name: "lost", port: 3009, groups: ["g1"] },
         { name: "notes", port: 3001, groups: ["g1"] }
       ],
       lends: { g1: { lent: [
@@ -74,6 +78,10 @@ ShellRoot {
         { person: "LittleMac", name: "unread", kind: "python3", origin: "http://k5.localhost:41097/", held: "unapproved" },
         { person: "LittleMac", name: "untold", kind: "python3", origin: "http://k7.localhost:41097/", held: "another", token: null,
           now: { pid: 14, start: 24, program: "python3", name: "untold" } },
+        { person: "LittleMac", name: "account", kind: "python3", origin: "http://k8.localhost:41097/", held: "another", token: "t8",
+          now: { pid: null, start: null, program: "", name: "", account: "1001" } },
+        { person: "LittleMac", name: "lost", kind: "python3", origin: "http://k9.localhost:41097/", held: "another", token: null,
+          unread: "failed" },
         { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
       ], unanswered: [] } },
       listeners: []
@@ -152,7 +160,7 @@ ShellRoot {
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
       check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77 }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
-            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", token: "", now: null }]))
+            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", token: "", unread: "", now: null }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
       check("a group's lends from others, not yours, each running or not", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label + ":" + l.answering })),
             JSON.stringify(["Fedora:abc123:true", "Fedora:fff999:false"]))
@@ -186,20 +194,28 @@ ShellRoot {
         "Closed by svrngs. Its home page says why",
         "Closed until you choose what it shares",
         "Closed: what answers on its port isn't what you chose to share",
+        "Closed: what answers on its port isn't what you chose to share",
+        "Closed: what answers on its port isn't what you chose to share",
         "Not running now: start it, and your people can open it"]))
       check("under it, what svrngs read answering on its port", JSON.stringify(barPanel.lent.map(function(l) { return barPanel.nowWords(l) })), JSON.stringify([
         "svrngs now keeps each share to the program you approve. Now answering: puma in my-garden.",
         "Its program isn't running. Start it, then keep sharing it here.",
         "What answers on its port now can't be shared from here.",
-        "", "",
+        "Now answering: python3 in odd.",
+        "Now answering: python3 in shaped.",
         "svrngs now keeps each share to the program you approve.",
         "Now answering: python3 in untold.",
+        "Now answering: a program of the account 1001.",
+        "svrngs couldn't read what answers on its port. Open this panel again to look again.",
         ""]))
       check("each keeps the token its row was listed with", JSON.stringify(barPanel.lent.map(function(l) { return l.token })),
-            JSON.stringify(["t1", "", "t3", "t4", "t6", "", "", ""]))
-      check("Keep sharing it only where svrngs listed a token and read a program the panel lends, held for a reason it knows",
+            JSON.stringify(["t1", "", "t3", "t4", "t6", "", "", "t8", "", ""]))
+      check("Keep sharing it wherever svrngs listed a token, for any reason it holds the lend, unless the panel never lends what answers",
             JSON.stringify(barPanel.stops.filter(function(s) { return /^(stop|keep):/.test(s) })),
-            JSON.stringify(["stop:garden", "keep:garden", "stop:quiet", "stop:theirs", "stop:odd", "stop:shaped", "stop:unread", "stop:untold", "stop:notes"]))
+            JSON.stringify(["stop:garden", "keep:garden", "stop:quiet", "stop:theirs", "stop:odd", "keep:odd", "stop:shaped", "keep:shaped",
+              "stop:unread", "stop:untold", "stop:account", "keep:account", "stop:lost", "stop:notes"]))
+      check("another account's program is kept by the token alone, no process named",
+            JSON.stringify(Model.approveArgs(barPanel.lent[7])), JSON.stringify(["approve", "account", "--token", "t8"]))
       var twice = JSON.parse(JSON.stringify(kept))
       twice.groups = running.groups.slice(0, 2).map(function(g) { return Object.assign({}, g, { person: "LittleMac" }) })
       twice.lends.g2 = { lent: [Object.assign({}, kept.lends.g1.lent[0], { token: "t9", now: { pid: 99, start: 98, program: "puma", name: "my-garden" } })], unanswered: [] }

@@ -89,6 +89,7 @@ function lent(answer) {
       answering: answering[m.name] === false ? false : true,
       held: row.held || "",
       token: typeof row.token === "string" ? row.token : "",
+      unread: typeof row.unread === "string" ? row.unread : "",
       now: nowOf(row.now)
     }
   })
@@ -105,27 +106,34 @@ function heldKey(held) {
 
 // What answers on a held lend's port, as svrngs read it for the lend's row
 // (the helper's `svrngs_now`): null when the row says nothing, from an
-// svrngs before 1.13.0; else whether anything runs there and, when it is a
-// program the panel lends, the process Keep sharing it names.
+// svrngs before 1.13.0 or where svrngs couldn't read it (the row's
+// `unread`); else whether anything runs there and what Keep sharing it
+// keeps: a program the panel lends, by its process, or another account's,
+// by its account alone.
 function nowOf(n) {
   if (n === undefined) return null
-  if (n === null) return { running: false, keep: false, program: "", name: "", pid: null, start: null }
+  if (n === null) return { running: false, keep: false, program: "", name: "", pid: null, start: null, account: "" }
   var counted = function(v) { return typeof v === "number" && v >= 0 && Math.floor(v) === v }
-  return { running: true, keep: counted(n.pid) && counted(n.start), program: n.program || "", name: n.name || "", pid: n.pid, start: n.start }
+  var account = typeof n.account === "string" ? n.account : ""
+  var process = counted(n.pid) && counted(n.start)
+  return { running: true, keep: process || account !== "", program: n.program || "", name: n.name || "", pid: process ? n.pid : null, start: process ? n.start : null, account: account }
 }
 
-// Whether a lend of yours offers Keep sharing it: svrngs holds it for a
-// reason the panel knows, listed it with a token, and read a program the
-// panel lends answering there.
+// Whether a lend of yours offers Keep sharing it: svrngs listed it with a
+// token, which it gives only where approving it would be taken (svrngs
+// share.rs `approve`, the one decider), and what answers there isn't
+// something the panel never lends (the helper's deny list).
 function keepable(l) {
-  return !!l && l.held !== "" && heldKey(l.held) !== "here.heldUnknown" && l.token !== "" && l.now !== null && l.now.keep === true
+  return !!l && l.token !== "" && l.now !== null && l.now.keep === true
 }
 
 // The helper's argv to keep sharing `l` to what its line shows: the token
-// its row was listed with, and the process the line names. svrngs approves
+// its row was listed with, and the process the line names, if it names one;
+// another account's program is kept by the token alone. svrngs approves
 // that only while it is still what answers, and changes nothing else.
 function approveArgs(l) {
-  return ["approve", l.name, "--token", l.token, "--pid", processOf(l.now)]
+  var args = ["approve", l.name, "--token", l.token]
+  return l.now.pid === null ? args : args.concat(["--pid", processOf(l.now)])
 }
 
 // What listens on each of this computer's lends' ports, by the helper's own

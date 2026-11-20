@@ -319,15 +319,18 @@ fake = Fake()
 data_dir(home, port=fake.port)
 (home / "garden-app").mkdir()
 garden_port, quiet_port, browser_port = closed_port(), closed_port(), closed_port()
-for name, port in (("garden", garden_port), ("quiet", quiet_port), ("browser", browser_port)):
+for name, port in (("garden", garden_port), ("quiet", quiet_port), ("browser", browser_port), ("debug", 9222)):
     (home / f".svrngs/lends/{name}.json").write_text(json.dumps({"port": port, "kind": "python3", "groups": ["a" * 64]}))
 garden, garden_start = serve(garden_port, home, comm=ODD_COMM, folder=home / "garden-app")
 browser, browser_start = serve(browser_port, home, comm="chromium")
 # This computer's own lends as svrngs lists them to it (door.rs `offered`
-# for their lender, 0b36268e:641-650): `held`, and for a held one with a
-# port, `answers` (lend.rs `Answer`) and `token` (share.rs `token`), the
-# token absent where svrngs approves nothing, as for a program listening only
-# on another address. Another person's lend says none of these (door.rs:597).
+# for their lender): `held`, and for a held one with a port, `answers`
+# (lend.rs `Answer`) and `token` (share.rs `token`), the token given only
+# where approving it would be taken (share.rs `approve`, the one decider),
+# as it is for another account's program on Linux and is not for a program
+# listening only on another address; or, where svrngs couldn't read what
+# answers, `unread` with its reason (uid.rs `Unread`) and no `answers`.
+# Another person's lend says none of these (door.rs `lends`).
 LISTED = "0f" * 32
 own = lambda name, **row: {"person": "LittleMac", "name": name, "kind": "python3", "origin": f"http://{name}1.localhost:{fake.port}/", **row}
 program = lambda server, start, folder: {"pid": server.pid, "start": start, "program": "python3", "folder": folder}
@@ -344,6 +347,10 @@ fake.lends = {"lent": [
     own("shapeless", held="another", answering=True, answers=[{"pid": "9"}], token=LISTED),
     own("spaced", held="another", answering=True, answers=[garden_said], token="0f 0f"),
     own("older", held="another", answering=True),
+    own("failed", held="another", answering=True, unread={"why": "failed", "detail": "the read stopped"}),
+    own("noreader", held="another", answering=True, unread={"why": "no_reader"}),
+    own("newer", held="another", answering=True, unread={"why": "a newer svrngs's"}),
+    own("debug", held="another", answering=True, answers=[{"account": "1001"}], token=LISTED),
     own("paused", held="paused"), own("shaped", held={"why": "a newer svrngs's"}), own("listed", held=["another"]),
     own("open", answering=True), own("nulled", held=None), own("blank", held=""),
     {"person": "Fedora", "name": "theirs-open", "kind": "spot", "origin": f"http://f1.localhost:{fake.port}/", "answering": True},
@@ -357,10 +364,13 @@ rows_said = full["lends"]["a" * 64]["lent"]
 check("svrngs's reasons pass through, unapproved its own; one this helper doesn't know is held all the same",
       [l["held"] for l in rows_said],
       ["unapproved", "another", "unjudged", "another", "another", "another", "unjudged", "another", "another", "another", "another",
-       "unknown", "unknown", "unknown", None, None, None, None])
+       "another", "another", "another", "another", "unknown", "unknown", "unknown", None, None, None, None])
 check("each held one's token passes through; one that is no token is none",
       [l["token"] for l in rows_said][:10], [LISTED, None, LISTED, LISTED, LISTED, None, None, LISTED, LISTED, None])
 check("what svrngs read on its port passes through", rows_said[0]["answers"], [garden_said])
+check("why svrngs couldn't read it passes through, a reason this helper doesn't know as unknown; read, none",
+      {l["name"]: l["unread"] for l in rows_said if l["unread"] is not None or l["name"] in ("garden", "quiet")},
+      {"failed": "failed", "noreader": "no_reader", "newer": "unknown", "garden": None, "quiet": None})
 now = {l["name"]: l.get("now", "unsaid") for l in rows_said}
 check("its line: the process svrngs read, by its pid and start",
       {k: (now["garden"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
@@ -368,11 +378,16 @@ check("named as the panel offers it, by its own command, spaces and parentheses 
       {k: (now["garden"] or {}).get(k) for k in ("program", "name")}, {"program": ODD_COMM, "name": "garden-app"})
 check("nothing svrngs could name, and its port took no connection: nothing answers", now["quiet"], None)
 other = {"pid": None, "start": None, "program": "", "name": ""}
-for name, why in (("browser", "a program on the deny list, by its command"), ("theirs", "another account's program"),
-                  ("mixed", "a program beside another account's"), ("far", "what svrngs gave no token for"),
+for name, why in (("browser", "a program on the deny list, by its command"), ("far", "what svrngs gave no token for"),
                   ("unread", "what took a connection that svrngs couldn't name"), ("shapeless", "an answer in no shape svrngs gives"),
-                  ("spaced", "a token that is none")):
+                  ("spaced", "a token that is none"), ("debug", "another account's program on a port on the deny list")):
     check(f"{why}: nothing for Keep sharing it to name", now[name], other)
+check("another account's program svrngs listed a token for: kept by its account, with no process",
+      now["theirs"], {**other, "account": "1001"})
+check("a program beside another account's, listed with a token: the program svrngs names first, as the home page sends it",
+      {k: (now["mixed"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
+check("what svrngs couldn't read: no line of what answers, its reason said instead",
+      [now[n] for n in ("failed", "noreader", "newer")], ["unsaid"] * 3)
 check("a process gone since svrngs read it: said in svrngs's words, its pid and start as svrngs read them",
       now["gone"], {"pid": garden.pid, "start": garden_start + 1, "program": "python3", "name": "garden-app"})
 check("a row with no answers, from an svrngs before 1.13.0, or not held, or not this computer's: no line",
@@ -513,6 +528,13 @@ check("what svrngs kept it to is said, as `svrngs approve` says it (cli.rs:1746)
       (True, "garden is kept to python3 in ~/garden-app now."))
 check("the svrngs command is never run to approve: it takes no token, so would approve what answers then",
       (home / "svrngs-argv").exists(), False)
+fake.ports["theirs"] = {"port": 3003, "token": LISTED, "processes": {}, "answers": [{"account": "1001"}]}
+asked = len(posted())
+got, _ = run(home, "approve", "theirs", "--token", LISTED)
+check("another account's program, which its line names no process for: svrngs is sent the token alone",
+      posted()[asked:], [("/v1/lends/theirs/approve", "application/json", {"token": LISTED})])
+check("and keeps it to that", (got["ok"], got["said"], fake.approved),
+      (True, "theirs is kept to a program of the account 1001 now.", ["garden", "theirs"]))
 # svrngs's refusals, as its approve route answers them (surface.rs:177-208,
 # share.rs:276-288, door.rs:287 at 0b36268e): 403, its words in `error`.
 for args, said in ((["--token", "1e" * 32, "--pid", "4242@987654"], "svrngs can't share port 3000: what answers on port 3000 changed; choose it again."),
@@ -522,8 +544,8 @@ for args, said in ((["--token", "1e" * 32, "--pid", "4242@987654"], "svrngs can'
     check(f"svrngs's refusal is said as it said it: …{said[30:62]}…", (got["ok"], got["said"]), (False, said))
 got, _ = run(home, "approve", "notes", "--token", LISTED, "--pid", "4242@987654")
 check("a share svrngs doesn't have: its words", (got["ok"], got["said"]), (False, "nothing is shared from a port here by the name notes"))
-check("nothing it refused is approved", fake.approved, ["garden"])
-for args in (["garden"], ["garden", "--pid", "4242@987654"], ["garden", "--token", LISTED],
+check("nothing it refused is approved", fake.approved, ["garden", "theirs"])
+for args in (["garden"], ["garden", "--pid", "4242@987654"],
              ["garden", "--token", "--pid", "4242@987654"], ["garden", "--token", "0f 0f", "--pid", "4242@987654"],
              ["garden", "--token", LISTED, "--pid", "4242"], ["garden", "--token", LISTED, "--pid"],
              ["--replace", "--token", LISTED, "--pid", "4242@1"], ["-x", "--token", LISTED, "--pid", "4242@1"]):
