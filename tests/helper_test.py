@@ -9,6 +9,7 @@ Each case runs the real helper as the shell does, with an argv list.
 
 import json
 import os
+import pwd
 import socket
 import subprocess
 import sys
@@ -23,6 +24,20 @@ from fake_svrngs import TOKEN, Fake  # noqa: E402
 HELPER = HERE.parent / "bin" / "svrngs-fam"
 SCRATCH = tempfile.TemporaryDirectory(prefix="svrngs-fam-test-")
 failures = []
+
+
+def unnamed():
+    """A uid with no account on this computer, so the helper says it by its
+    number: a fixed one, like 1001, is a real account on many machines."""
+    for uid in range(60001, 65534):
+        try:
+            pwd.getpwuid(uid)
+        except KeyError:
+            return str(uid)
+    raise SystemExit("helper_test: every uid from 60001 has an account here")
+
+
+UNNAMED = unnamed()
 
 
 def check(name, got, want):
@@ -339,8 +354,8 @@ fake.lends = {"lent": [
     own("garden", held="unapproved", answering=True, answers=[garden_said], token=LISTED),
     own("quiet", held="another", answering=False, answers=[]),
     own("browser", held="unjudged", answering=True, answers=[program(browser, browser_start, "~")], token=LISTED),
-    own("theirs", held="another", answering=True, answers=[{"account": "1001"}], token=LISTED),
-    own("mixed", held="another", answering=True, answers=[garden_said, {"account": "1001"}], token=LISTED),
+    own("theirs", held="another", answering=True, answers=[{"account": UNNAMED}], token=LISTED),
+    own("mixed", held="another", answering=True, answers=[garden_said, {"account": UNNAMED}], token=LISTED),
     own("far", held="another", answering=True, answers=[garden_said]),
     own("unread", held="unjudged", answering=True, answers=[]),
     own("gone", held="another", answering=True, answers=[program(garden, garden_start + 1, "~/garden-app")], token=LISTED),
@@ -350,9 +365,9 @@ fake.lends = {"lent": [
     own("failed", held="another", answering=True, unread={"why": "failed", "detail": "the read stopped"}),
     own("noreader", held="another", answering=True, unread={"why": "no_reader"}),
     own("newer", held="another", answering=True, unread={"why": "a newer svrngs's"}),
-    own("debug", held="another", answering=True, answers=[{"account": "1001"}], token=LISTED),
+    own("debug", held="another", answering=True, answers=[{"account": UNNAMED}], token=LISTED),
     own("root", held="another", answering=True, answers=[{"account": "0"}], token=LISTED),
-    own("accounts", held="another", answering=True, answers=[{"account": "0"}, {"account": "1001"}], token=LISTED),
+    own("accounts", held="another", answering=True, answers=[{"account": "0"}, {"account": UNNAMED}], token=LISTED),
     own("paused", held="paused"), own("shaped", held={"why": "a newer svrngs's"}), own("listed", held=["another"]),
     own("open", answering=True), own("nulled", held=None), own("blank", held=""),
     {"person": "Fedora", "name": "theirs-open", "kind": "spot", "origin": f"http://f1.localhost:{fake.port}/", "answering": True},
@@ -386,13 +401,13 @@ for name, why in (("browser", "a program on the deny list, by its command"), ("f
                   ("spaced", "a token that is none"), ("debug", "another account's program on a port on the deny list")):
     check(f"{why}: nothing for Keep sharing it to name", now[name], other)
 check("another account's program svrngs listed a token for: kept by its account, with no process",
-      now["theirs"], {**other, "account": "1001", "said": "a program of the account 1001"})
+      now["theirs"], {**other, "account": UNNAMED, "said": f"a program of the account {UNNAMED}"})
 check("another account named by its name on this computer, not its number", now["root"],
       {**other, "account": "root", "said": "a program of the account root"})
 check("every one svrngs listed is said, as its token approves them all, not the first alone",
       [now[n]["said"] for n in ("accounts", "mixed")],
-      ["a program of the account root and a program of the account 1001",
-       "python3 in ~/work/garden-app and a program of the account 1001"])
+      [f"a program of the account root and a program of the account {UNNAMED}",
+       f"python3 in ~/work/garden-app and a program of the account {UNNAMED}"])
 check("a program beside another account's, listed with a token: the program svrngs names first, as the home page sends it",
       {k: (now["mixed"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
 check("what svrngs couldn't read: no line of what answers, its reason said instead",
