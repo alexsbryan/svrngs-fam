@@ -63,9 +63,16 @@ Panel {
   readonly property var shownModels: fam.models.filter(function(m) { return Model.modelShown(m, root.query) })
 
   // The lend waiting for its second press: { port, program, name }, or null.
+  // It stays until svrngs lends it, so a refusal can be answered in place.
   property var lending: null
   property string lendName: ""
+  property bool nameEdited: false
   property string lendGroup: ""
+  // Which program it is, asked only once svrngs says it doesn't know its
+  // port (the helper's `asks`), with the programs svrngs knows.
+  property bool askProgram: false
+  property string lendProgram: ""
+  property var knownPrograms: []
   // The group whose new invite link waits for its second press.
   property string inviting: ""
   // Get svrngs waiting for its second press, and the invite link given, if any.
@@ -113,6 +120,11 @@ Panel {
   Service {
     id: fam
     wanted: root.opened
+  }
+
+  Connections {
+    target: fam
+    function onReplied(key, reply) { if (key === "lend") root.lendAnswered(reply) }
   }
 
   onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; cursorActive = false; cursor = 0; query = "" }
@@ -173,6 +185,10 @@ Panel {
     inviting = ""
     lending = offer
     lendName = offer.name
+    nameEdited = false
+    askProgram = false
+    lendProgram = ""
+    knownPrograms = []
     lendGroup = groups.length > 0 ? groups[0].id : ""
   }
 
@@ -181,10 +197,32 @@ Panel {
     if (groups.length > 0) lendGroup = groups[(at + 1) % groups.length].id
   }
 
+  // The program typed, once svrngs asked: the name follows it until the
+  // person changes the name.
+  function typeProgram(text) {
+    lendProgram = text
+    if (!nameEdited && lending) lendName = Model.freeName(text || lending.name, lending.port, fam.answer ? fam.answer.mine : [])
+  }
+
   function lend() {
     var name = Model.cleanName(lendName)
-    if (!lending || name === "" || lendGroup === "") return
-    if (fam.act("lend", Model.shareArgs(lending, lendGroup, name))) lending = null
+    var program = askProgram ? Model.cleanName(lendProgram) : ""
+    if (!lending || name === "" || lendGroup === "" || askProgram && program === "") return
+    fam.act("lend", Model.shareArgs(lending, lendGroup, name, program))
+  }
+
+  // svrngs's answer to a lend: lent, the question closes; refused, it
+  // stays, its words said above, and asks which program it is when svrngs
+  // doesn't know the port.
+  function lendAnswered(reply) {
+    if (!lending) return
+    if (reply.ok === true) { lending = null; askProgram = false; return }
+    if (reply.asks !== "program") return
+    askProgram = true
+    // A list through a signal is a sequence, not a JS Array.
+    var known = []
+    for (var i = 0; reply.known && i < reply.known.length; i++) if (typeof reply.known[i] === "string") known.push(reply.known[i])
+    knownPrograms = known
   }
 
   function stop(name) { fam.act("stop:" + name, ["unshare", name]) }
@@ -576,9 +614,29 @@ Panel {
                   width: Style.space(200)
                   text: root.lendName
                   foreground: root.foreground
-                  onTextEdited: root.lendName = text
+                  onTextEdited: { root.lendName = text; root.nameEdited = true }
                   onAccepted: root.lend()
                 }
+              }
+              // Which program it is, once svrngs asked: one word, its own
+              // name, and the programs svrngs knows, whose terms it keeps.
+              Row {
+                visible: root.askProgram
+                spacing: Style.space(8)
+                Note { text: strings.t("lend.program"); width: implicitWidth; anchors.verticalCenter: parent.verticalCenter }
+                TextField {
+                  width: Style.space(200)
+                  text: root.lendProgram
+                  foreground: root.foreground
+                  onTextEdited: root.typeProgram(text)
+                  onAccepted: root.lend()
+                }
+              }
+              Note {
+                visible: root.askProgram
+                text: !root.lending ? ""
+                  : (root.lending.through ? strings.t("lend.through").arg(root.lending.program) + " " : "")
+                    + (root.knownPrograms.length > 0 ? strings.t("lend.known").arg(root.knownPrograms.join(", ")) : "")
               }
               Dropdown {
                 visible: root.groups.length > 1
@@ -597,7 +655,7 @@ Panel {
                   doing: "lend"
                   stop: "lend:confirm"
                   words: strings.t("action.lend")
-                  enabled: fam.doing === "" && Model.cleanName(root.lendName) !== ""
+                  enabled: fam.doing === "" && Model.cleanName(root.lendName) !== "" && (!root.askProgram || Model.cleanName(root.lendProgram) !== "")
                   onClicked: root.lend()
                 }
                 Act { words: strings.t("action.cancel"); stop: "lend:cancel"; onClicked: root.lending = null }

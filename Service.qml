@@ -70,6 +70,11 @@ Item {
   // The last command run for an action, for the logic test and `status`.
   property var lastAsked: []
 
+  // An action's whole reply, by the key it was asked under, as it ends:
+  // the panel keeps a lend's question open until it is lent, and asks
+  // which program it is when svrngs asks.
+  signal replied(string key, var reply)
+
   function act(key, args) {
     if (doing !== "") return false
     doing = key
@@ -207,8 +212,11 @@ Item {
     onExited: function(code) {
       var reply
       try { reply = JSON.parse(String(actionOut.text)) } catch (e) { reply = { ok: false, said: "The helper exited " + code + " without an answer" } }
+      if (!reply || typeof reply !== "object") reply = { ok: false, said: "The helper's answer was not an answer" }
       root.tell(String(reply.said || (reply.ok ? "Done" : "That didn't work")), reply.ok === true)
+      var key = root.doing
       root.doing = ""
+      root.replied(key, reply)
       root.refresh(root.wanted ? root.full : root.short)
     }
   }

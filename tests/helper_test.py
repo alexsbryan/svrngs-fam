@@ -57,27 +57,41 @@ def check(name, got, want):
 # before the command: 1.12.1 has no --pid (cli.rs:364 at v1.12.1), and
 # 1.12.2's takes a process id alone (cli.rs:305, :321 at v1.12.2).
 # $HOME/refuse holds what svrngs refuses a share with once it ran, and
-# $HOME/unparsed what it refuses before it runs.
+# $HOME/unparsed what it refuses before it runs. A share of a port svrngs's
+# table doesn't know, given no --program, is refused as svrngs refuses it,
+# naming the programs it knows (share.rs `ShareRefusal::NoKind`); the ports
+# it knows are 8096 and those in $HOME/known-ports. Each run's argv is
+# also added to $HOME/svrngs-calls, a line each.
 FAKE_COMMAND = r"""#!/bin/bash
 printf '%s\n' "$@" > "$HOME/svrngs-argv"
+printf '%s\n' "$*" >> "$HOME/svrngs-calls"
 cat > "$HOME/svrngs-stdin"
 old=$(cat "$HOME/old-svrngs" 2>/dev/null)
 unparsed() { printf 'svrngs: %s\n\nsvrngs — keep what your group shares on your own computers.\n\nTo build an app for your group, make a folder with an index.html in it:\n' "$1" >&2; exit 1; }
 refused() { printf 'svrngs: %s\n' "$(cat "$HOME/refuse")" >&2; exit 1; }
 [ -e "$HOME/unparsed" ] && unparsed "$(cat "$HOME/unparsed")"
-prev=
+prev= program=
 for arg in "$@"; do
   [ "$old" = 1.12.1 ] && [ "$arg" = --pid ] && unparsed 'unknown argument `--pid`'
   [ "$old" = 1.12.2 ] && [ "$prev" = --pid ] && ! [[ $arg =~ ^[0-9]+$ ]] && unparsed "--pid \`$arg\` is not a process id"
+  [ "$prev" = --program ] && program=$arg
   prev=$arg
 done
 case "$1" in
   share)
+    if [ -z "$program" ] && ! grep -qx "$2" <(echo 8096; cat "$HOME/known-ports" 2>/dev/null); then
+      printf 'svrngs: say which program is on port %s: `svrngs share %s --program <name>`, its own name if it is one svrngs knows: audiobookshelf, calibre-web, factorio, holyarrs, immich, jellyfin, kokoro, llama-server, minecraft, navidrome\n' "$2" "$2" >&2
+      exit 1
+    fi
     [ -e "$HOME/refuse" ] && refused
     printf 'If %s takes a password on each request, paste what it takes in its Authorization header, then press Enter (Enter alone for none): ' "$6" >&2
     echo "You lend $6 (port $2) to the groups you chose, as many at once as want it. To let fewer in at once, change it on your home page, or \`svrngs share $2 --group <group> --limit <number>\`."
     echo "Lent $6: python3 in ~/garden-app. svrngs checks port $2 before each connection it carries there. While another program is on the port, it is closed. If the program starts again, $6 closes until you approve what runs there: \`svrngs approve $6\`."
-    echo "svrngs doesn't know $8, so your friends can reach every part of it that its own sign-in allows." ;;
+    if [ -n "$program" ]; then
+      echo "svrngs doesn't know $program, so your friends can reach every part of it that its own sign-in allows."
+    else
+      echo "$6 asks each person to sign in once, with an account you make them. In jellyfin: your picture at the top right, then Dashboard, Users and +."
+    fi ;;
   unshare) echo "You no longer lend $2." ;;
   restart) echo "svrngs is restarting. Your home page comes back in a moment." ;;
   link) cat "$HOME/link-said" ;;
@@ -347,15 +361,19 @@ check("nothing was opened in the browser", (home / "browser-argv").exists(), Fal
 home = case("what runs here, and what is offered")
 fake = Fake()
 data_dir(home, port=fake.port)
-puma_port, folder_port, lent_port, odd_port = closed_port(), closed_port(), closed_port(), closed_port()
+puma_port, folder_port, lent_port, odd_port, pasta_port = closed_port(), closed_port(), closed_port(), closed_port(), closed_port()
 (home / "notes-app").mkdir()
 (home / ".svrngs/lends/lentone.json").write_text(json.dumps({"port": lent_port, "kind": "python3", "groups": []}))
 odd, odd_start = serve(odd_port, home, comm=ODD_COMM, folder=home / "notes-app")
+# As rootless Podman publishes a container's port: pasta listens, and
+# passes each connection on into the container.
+pasta, _ = serve(pasta_port, home, comm="pasta.avx2")
 servers = [
     listen(puma_port, title=f"puma 8.1.2 (tcp://127.0.0.1:{puma_port}) [My Garden]"),
     listen(folder_port, folder=home / "notes-app"),
     listen(lent_port),
     odd,
+    pasta,
 ]
 debug = None
 try:
@@ -372,6 +390,8 @@ check("each offer names its process, by pid and start",
 check("puma is named by its own title", (offered.get(puma_port) or {}).get("program"), "puma")
 check("and offered under its app's name", (offered.get(puma_port) or {}).get("name"), "my-garden")
 check("a server in its folder is offered under the folder's name", (offered.get(folder_port) or {}).get("name"), "notes-app")
+check("a program that only passes a port on, as pasta does for a container, is offered as that, so it is never named as the program",
+      [(offered.get(p) or {}).get("through") for p in (pasta_port, folder_port, puma_port)], [True, False, False])
 check("what is already lent is not offered again", lent_port in offered, False)
 check("svrngs's own port is not offered", fake.port in offered, False)
 check("a browser's debug port (9222) could be planted", debug is not None, True)
@@ -580,6 +600,23 @@ check("svrngs's words, without the password question or the terminal tips", got[
       "svrngs doesn't know puma, so your friends can reach every part of it that its own sign-in allows.")
 got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
 check("svrngs is told the process the panel showed, by its pid and start", (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (True, ["--pid", "4242@987654"]))
+# svrngs's kind for a port its table knows comes with the terms it ships
+# for it (svrngs share.rs `kind_of`: a --program given wins over it).
+calls = lambda: (home / "svrngs-calls").read_text().splitlines()
+lend_as = f"share {{}} --group {'a' * 64} --name {{}}{{}} --pid 4242@987654"
+(home / "svrngs-calls").unlink()
+got, _ = run(home, "share", "8096", "a" * 64, "films", "--program", "pasta.avx2", "--pid", "4242@987654")
+check("a port svrngs knows is lent as svrngs knows it: the program the panel read there is never said",
+      (got["ok"], calls()), (True, [lend_as.format(8096, "films", "")]))
+(home / "svrngs-calls").unlink()
+got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")
+check("a port svrngs doesn't know: svrngs is asked first, and told the program only when it asks",
+      (got["ok"], calls()), (True, [lend_as.format(3000, "garden", ""), lend_as.format(3000, "garden", " --program puma")]))
+(home / "svrngs-calls").unlink()
+got, _ = run(home, "share", "8101", "a" * 64, "coder", "--pid", "4242@987654")
+check("a port svrngs doesn't know, and no program named: nothing lent, the program asked for, with those svrngs knows",
+      (got["ok"], got.get("asks"), "llama-server" in (got.get("known") or []), len(calls())), (False, "program", True, 1))
+check("and said plainly", got["said"], "svrngs doesn't know what answers on port 8101. Say which program it is, then press Lend again.")
 for bad in ("42; rm", "4242", "4242@", "@99", "4242@99@1"):
     got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", bad)
     check(f"--pid {bad!r}, not a process and its start, is refused, svrngs not run",

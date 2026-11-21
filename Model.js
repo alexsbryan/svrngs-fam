@@ -160,11 +160,12 @@ function processOf(p) {
 // What runs here and could be lent. The helper already leaves out what is
 // lent, svrngs itself, browsers' debug ports and the rest of its deny list.
 // Each keeps the pid and start of the process shown, which lending it names,
-// and is offered under a name no other port's lend has.
+// and whether that process only passes the port on (`through`: pasta for a
+// container), and is offered under a name no other port's lend has.
 function offers(answer) {
   if (!running(answer) || !answer.listeners) return []
   return answer.listeners.map(function(l) {
-    return { port: l.port, program: l.program, name: freeName(l.name || l.program, l.port, answer.mine), pid: l.pid, start: l.start }
+    return { port: l.port, program: l.program, name: freeName(l.name || l.program, l.port, answer.mine), pid: l.pid, start: l.start, through: l.through === true }
   })
 }
 
@@ -214,12 +215,19 @@ function labelOf(origin) {
   return match ? match[1] : ""
 }
 
-// The helper's argv to lend `offer` to `group` as `name`. The program is
-// always said: svrngs refuses a port it does not know without it (S0 (c)).
-// So is the process the panel showed: svrngs lends the port only if that
-// process holds every socket on it, and keeps the lend to those sockets.
-function shareArgs(offer, groupId, name) {
-  return ["share", String(offer.port), groupId, name, "--program", offer.program, "--pid", processOf(offer)]
+// The helper's argv to lend `offer` to `group` as `name`. The helper asks
+// svrngs first with no program, so a port svrngs knows is lent with the
+// terms svrngs ships for it, and says `--program` only for a port svrngs
+// doesn't know (svrngs refuses that without one, S0 (c)): `program`, the
+// one the person named once svrngs asked, else the program the panel read
+// on the port, unless that only passes it on (pasta, for a container),
+// which says nothing of what answers. The process the panel showed is
+// always said: svrngs lends the port only if that process holds every
+// socket on it, and keeps the lend to those sockets.
+function shareArgs(offer, groupId, name, program) {
+  var said = program || (offer.through ? "" : offer.program)
+  var named = said ? ["--program", said] : []
+  return ["share", String(offer.port), groupId, name].concat(named, ["--pid", processOf(offer)])
 }
 
 // A name svrngs takes for a lend, as the helper makes them.

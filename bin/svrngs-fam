@@ -10,6 +10,8 @@ Verbs:
                                   lends and what listens on this computer,
                                   --here only what listens on this computer
   share <port> <group> <name> [--program <kind>] [--pid <pid>@<start>] [--password-stdin]
+                                  lends it as svrngs knows its port, else as
+                                  --program; with neither, asks which program
   approve <name> --token <token> --pid <pid>@<start>
                                   keeps sharing a held share to what its row
                                   showed answering on its port: the token
@@ -292,6 +294,14 @@ def listening():
     return found
 
 
+# Programs that listen on a port only to pass each connection on to
+# another program, so their name says nothing of what answers: pasta and
+# rootlessport for a rootless container's published port, slirp4netns,
+# docker-proxy, gvproxy and vpnkit for others', socat, and ssh's own
+# forwards (`ssh -L` here, `ssh -R` through sshd).
+FORWARDERS = re.compile(r"(pasta|passt)(\.avx2)?|rootlessport|rootlesskit|slirp4netns|docker-proxy|gvproxy|vpnkit|socat|sshd?")
+
+
 def kept_back(port, *commands):
     """Whether the panel never lends `port`, or a program by any of these
     names, as on its deny list."""
@@ -300,9 +310,11 @@ def kept_back(port, *commands):
 
 def lendable(port, holder):
     """The listener `holder` on `port` as the panel would lend it: its pid,
-    the start svrngs checks it by, its program and the name to offer, or
-    None when the panel never lends it (someone else's, on the deny list,
-    or gone before its start was read)."""
+    the start svrngs checks it by, its program and the name to offer, and
+    whether it only passes the port on (`through`, FORWARDERS), so its
+    program is shown but never said to svrngs as what answers; or None
+    when the panel never lends it (someone else's, on the deny list, or
+    gone before its start was read)."""
     if holder is None or kept_back(port, holder[0]):
         return None
     command, pid = holder
@@ -310,7 +322,8 @@ def lendable(port, holder):
     if start is None:
         return None
     program, offered = describe(pid, command)
-    return {"pid": pid, "start": start, "program": text(program), "name": offered}
+    return {"pid": pid, "start": start, "program": text(program), "name": offered,
+            "through": bool(FORWARDERS.fullmatch(command))}
 
 
 def listeners(listed, skip_ports):
@@ -641,6 +654,36 @@ def run_svrngs(args, stdin="", raw=False, older=()):
         cut for cut in (re.sub(r"[^.\n]*`[^`\n]*`[^.\n]*\.?", "", line).strip() for line in said.splitlines()) if cut
     )
     return {"ok": True, "code": 0, "said": (plain or said)[:4000]}
+
+
+# What svrngs says when it doesn't know a port's program and was told none
+# (svrngs share.rs `ShareRefusal::NoKind`, in its words at 1.13.1 and
+# 1.13.2), the programs it knows after them. Its help says it: --program
+# "says which program it is, when svrngs does not know the port; without
+# it, svrngs says the programs it knows" (svrngs help.txt).
+NO_KIND = re.compile(r"svrngs: say which program is on port \d+\b.*?svrngs knows: (?P<known>[a-z0-9_, -]*)$", re.S)
+
+
+def lend(args, process, program, secret, older):
+    """svrngs's `share` of a port, as svrngs's home page lends one
+    (home.rs `lend_one`): by the kind svrngs knows the port for, with the
+    terms svrngs ships for it, which a --program given would override
+    (share.rs `kind_of`), so svrngs is asked with none first. Only if it
+    doesn't know the port is it told `program`, the program the panel
+    read there or the person named; with none to tell it, nothing is lent,
+    and the reply asks which program it is (`asks`), with the programs
+    svrngs knows (`known`). svrngs refuses a port it doesn't know before it
+    reads, keeps or asks anything (share.rs `lend_of`), so asking again
+    lends it once."""
+    done = run_svrngs(args + process, stdin=secret, older=older)
+    unknown = None if done["ok"] else NO_KIND.match(done["said"])
+    if unknown is None:
+        return done
+    if program:
+        return run_svrngs(args + ["--program", program] + process, stdin=secret, older=older)
+    known = [k for k in unknown.group("known").split(", ") if re.fullmatch(r"[a-z0-9_-]{1,64}", k)]
+    return {"ok": False, "code": done["code"], "asks": "program", "known": known[:MAX_ROWS],
+            "said": f"svrngs doesn't know what answers on port {args[1]}. Say which program it is, then press Lend again."}
 
 
 def keep_sharing(name, shown, process):
@@ -1037,19 +1080,19 @@ def main(argv):
     if verb == "share" and len(rest) >= 3 and rest[0].isdigit():
         port, group, name = rest[:3]
         args = ["share", port, "--group", group, "--name", name]
-        if "--program" in rest:
-            args += ["--program", rest[rest.index("--program") + 1]]
+        at = rest.index("--program") + 1 if "--program" in rest else len(rest)
+        program = rest[at] if at < len(rest) else None
         # The process the panel showed, by its pid and start: svrngs lends
         # the port only if that process holds every socket on it, and
         # refuses, saying so, when the pid now names another process.
-        pid = None
+        pid, process = None, []
         if "--pid" in rest:
             pid, refused = process_of(rest)
             if refused:
                 return refused
-            args += ["--pid", pid]
+            process = ["--pid", pid]
         secret = sys.stdin.readline() if "--password-stdin" in rest else ""
-        return run_svrngs(args, stdin=secret.strip() + "\n", older=older_svrngs(pid) if pid else ())
+        return lend(args, process, program, secret.strip() + "\n", older_svrngs(pid) if pid else ())
     # A held share kept to what its row showed answering on its port: the
     # token the row was listed with, and the process its line named.
     if verb == "approve" and rest:

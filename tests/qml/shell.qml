@@ -158,7 +158,7 @@ ShellRoot {
       console.log("the panel's lists")
       show(running)
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
-      check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77 }]))
+      check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77, through: false }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
             JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", token: "", unread: "", now: null }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
@@ -322,9 +322,9 @@ ShellRoot {
       barPanel.lendName = "My Garden!"
       barPanel.lendGroup = "g2"
       barPanel.lend()
-      check("svrngs is asked to lend it, as named, to the group chosen, saying the program",
+      check("svrngs is asked to lend it, as named, to the group chosen, with the program the panel read for a port svrngs doesn't know",
             JSON.stringify(fam.lastAsked), JSON.stringify(["share", "3000", "g2", "my-garden", "--program", "puma", "--pid", "1@77"]))
-      check("the confirm closes", barPanel.lending, null)
+      check("the question stays while svrngs is asked", (barPanel.lending || {}).port, 3000)
       check("it runs", fam.doing, "lend")
       barPanel.stop("notes")
       check("a second action waits for the first", JSON.stringify(fam.lastAsked[0]), JSON.stringify("share"))
@@ -336,6 +336,8 @@ ShellRoot {
       // The harness's home has no svrngs, so the real helper says so.
       check("svrngs's answer is said", fam.said, "svrngs is not installed on this computer")
       check("as a failure", fam.saidOk, false)
+      check("a lend refused keeps its question, to change and press again", (barPanel.lending || {}).port, 3000)
+      barPanel.lending = null
 
       console.log("invite: a second press too")
       barPanel.inviting = "g1"
@@ -366,8 +368,48 @@ ShellRoot {
       check("svrngs is asked to approve what the line shows: its row's token, the process by its pid and start, nothing else",
             JSON.stringify(fam.lastAsked), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
       check("it runs", fam.doing, "keep:garden")
-      settle.then = harness.finish
+      settle.then = harness.forwarded
       settle.start()
+    }
+
+    // A container's port, as rootless Podman publishes it: pasta listens,
+    // and passes each connection on. pasta is never named as the program;
+    // svrngs names a port it knows, and the person one it doesn't.
+    function forwardedAnswer() {
+      var through = JSON.parse(JSON.stringify(running))
+      through.listeners = [{ port: 8101, program: "pasta.avx2", name: "pasta-avx2", pid: 2, start: 78, through: true }]
+      return through
+    }
+
+    function forwarded() {
+      console.log("lending what pasta passes on from a container")
+      show(forwardedAnswer())
+      check("it is offered as passing its port on", barPanel.offers[0].through, true)
+      check("lending it names no program, so svrngs's own is used for a port it knows",
+            JSON.stringify(Model.shareArgs(barPanel.offers[0], "g1", "films", "")), JSON.stringify(["share", "8101", "g1", "films", "--pid", "2@78"]))
+      barPanel.askLend(barPanel.offers[0])
+      check("nothing asks which program it is until svrngs does", barPanel.askProgram, false)
+      fam.replied("lend", { ok: false, asks: "program", known: ["kokoro", "llama-server"], said: "svrngs doesn't know what answers on port 8101." })
+      check("when svrngs asks, the question stays, and asks which program", [barPanel.lending !== null, barPanel.askProgram].join(","), "true,true")
+      check("with the programs svrngs knows", barPanel.knownPrograms.join(","), "kokoro,llama-server")
+      barPanel.typeProgram("llama-server")
+      check("the name follows the program typed, until it is changed", barPanel.lendName, "llama-server")
+      barPanel.lend()
+      check("and the lend says that program", JSON.stringify(fam.lastAsked),
+            JSON.stringify(["share", "8101", "g1", "llama-server", "--program", "llama-server", "--pid", "2@78"]))
+      settle.then = harness.forwardedAfter
+      settle.start()
+    }
+
+    function forwardedAfter() {
+      check("refused, it still asks which program", [barPanel.lending !== null, barPanel.askProgram].join(","), "true,true")
+      fam.replied("lend", { ok: true, said: "You lend llama-server (port 8101)." })
+      check("lent, the question closes", barPanel.lending, null)
+      show(forwardedAnswer())
+      barPanel.askLend(barPanel.offers[0])
+      check("a new question asks no program until svrngs does", [barPanel.askProgram, barPanel.lendProgram].join(","), "false,")
+      barPanel.lending = null
+      finish()
     }
 
     function finish() {
