@@ -7,6 +7,8 @@ A failure that is not a refused connection must be "unreadable", never
 Each case runs the real helper as the shell does, with an argv list.
 """
 
+import importlib.machinery
+import importlib.util
 import json
 import os
 import pwd
@@ -360,6 +362,63 @@ check("approve, open and models each refuse, saying so",
 check("it was sent no byte on any connection, and never the token",
       ([r for r in received.splitlines() if r != "b''"], TOKEN in received), ([], False))
 check("nothing was opened in the browser", (home / "browser-argv").exists(), False)
+
+
+def helper_module():
+    """The helper itself, loaded as a module, so one of its functions can be
+    given input no computer here can be made to show on cue."""
+    loader = importlib.machinery.SourceFileLoader("svrngs_fam", str(HELPER))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+# /proc/net/tcp as the helper reads it (proc(5)), for the server end of a
+# connection from 127.0.0.1:50000 to svrngs's 127.0.0.1:41097: each row in
+# `state`, its uid and its inode.
+HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode"
+
+
+def end_row(state, uid, inode):
+    return f"   0: 0100007F:A089 0100007F:C350 {state} 00000000:00000000 00:00000000 00000000 {uid:>5}        0 {inode} 1 0000000000000000 20 4 30 10 -1"
+
+
+class Listed:
+    """Stands in for pathlib.Path in the helper while one call runs: the
+    tables in `rows`, each read as /proc/net/tcp is."""
+    rows = {}
+
+    def __init__(self, path):
+        self.path = str(path)
+
+    def read_text(self):
+        return "\n".join([HEADER] + Listed.rows.get(self.path, [])) + "\n"
+
+
+class Connected:
+    """A connected socket's two ends, as the helper asks them."""
+
+    def getsockname(self):
+        return ("127.0.0.1", 50000)
+
+    def getpeername(self):
+        return ("127.0.0.1", 41097)
+
+
+def took(*rows):
+    """What the helper reads as having taken the connection, given `rows`."""
+    helper = helper_module()
+    helper.Path, Listed.rows = Listed, {"/proc/net/tcp": list(rows)}
+    return helper.taken_by(Connected())
+
+
+case("whose program took the helper's connection is read from that connection's row alone")
+me = os.getuid()
+# An earlier connection's TIME_WAIT row (06) with the same four numbers,
+# which Linux lists as uid 0 whoever held it; then this one's (01).
+check("a TIME_WAIT row before it is passed over", took(end_row("06", 0, 0), end_row("01", me, 4242)), me)
+check("a row in any other state is no program's end of it: none, never root",
+      [took(end_row(state, 0, 0)) for state in ("06", "08", "0A")], [None, None, None])
 
 home = case("what runs here, and what is offered")
 fake = Fake()

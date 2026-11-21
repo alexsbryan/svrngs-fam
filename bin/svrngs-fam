@@ -158,12 +158,23 @@ def proc_address(field):
     return (ip.ipv4_mapped or ip) if ip.version == 6 else ip, int(port, 16)
 
 
+# The state /proc/net/tcp gives a connection both of its ends hold open
+# (the kernel's TCP_ESTABLISHED, 01). A row in any other state is no
+# program's end of a connection just made: TIME_WAIT's (06) is one closed
+# before, which lists uid 0 whoever held it and may carry the four numbers
+# a new connection takes, so svrngs's own reader passes it over too (svrngs
+# uid.rs `read`).
+ESTABLISHED = "01"
+
+
 def taken_by(sock):
     """The account whose socket took `sock`'s connection: the uid of its
     other end, the row of /proc/net/tcp or tcp6 whose own address is where
-    `sock` connected and whose far one is `sock`'s, an accepted connection's
-    uid being its listener's. None when no such row can be read: Linux lists
-    the connection as its handshake ends, so it is looked for a few times."""
+    `sock` connected, whose far one is `sock`'s, and whose state is
+    ESTABLISHED, an accepted connection's uid being its listener's. Every
+    other row is passed over. None when no such row can be read: Linux
+    lists the connection as its handshake ends, so it is looked for a few
+    times."""
     near, far = sock.getsockname()[:2], sock.getpeername()[:2]
     want = ((ipaddress.ip_address(far[0]), far[1]), (ipaddress.ip_address(near[0]), near[1]))
     for _ in range(5):
@@ -174,7 +185,7 @@ def taken_by(sock):
                 continue
             for line in lines:
                 f = line.split()
-                if len(f) > 7 and f[7].isdigit() and (proc_address(f[1]), proc_address(f[2])) == want:
+                if len(f) > 7 and f[3] == ESTABLISHED and f[7].isdigit() and (proc_address(f[1]), proc_address(f[2])) == want:
                     return int(f[7])
         time.sleep(0.02)
     return None
