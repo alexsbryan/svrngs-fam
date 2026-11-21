@@ -477,7 +477,7 @@ for name, why in (("browser", "a program on the deny list, by its command"), ("f
                   ("unread", "what took a connection that svrngs couldn't name"), ("shapeless", "an answer in no shape svrngs gives"),
                   ("spaced", "a token that is none"), ("debug", "another account's program on a port on the deny list")):
     check(f"{why}: nothing for Keep sharing it to name", now[name], other)
-check("another account's program svrngs listed a token for: kept by its account, with no process",
+check("another account's program svrngs listed a token for: said by its account, with no process to keep it to",
       now["theirs"], {**other, "account": UNNAMED, "said": f"a program of the account {UNNAMED}"})
 check("another account named by its name on this computer, not its number", now["root"],
       {**other, "account": "root", "said": "a program of the account root"})
@@ -485,8 +485,8 @@ check("every one svrngs listed is said, as its token approves them all, not the 
       [now[n]["said"] for n in ("accounts", "mixed")],
       [f"a program of the account root and a program of the account {UNNAMED}",
        f"python3 in ~/work/garden-app and a program of the account {UNNAMED}"])
-check("a program beside another account's, listed with a token: the program svrngs names first, as the home page sends it",
-      {k: (now["mixed"] or {}).get(k) for k in ("pid", "start")}, {"pid": garden.pid, "start": garden_start})
+check("a program of yours beside another account's: said whole, by the other account, with no process to keep it to",
+      now["mixed"], {**other, "account": UNNAMED, "said": f"python3 in ~/work/garden-app and a program of the account {UNNAMED}"})
 check("what svrngs couldn't read: no line of what answers, its reason said instead",
       [now[n] for n in ("failed", "noreader", "newer")], ["unsaid"] * 3)
 check("a process gone since svrngs read it: said in svrngs's words, its pid and start as svrngs read them",
@@ -633,10 +633,8 @@ check("the svrngs command is never run to approve: the API takes the token the r
 fake.ports["theirs"] = {"port": 3003, "token": LISTED, "processes": {}, "answers": [{"account": "0"}]}
 asked = len(posted())
 got, _ = run(home, "approve", "theirs", "--token", LISTED)
-check("another account's program, which its line names no process for: svrngs is sent the token alone",
-      posted()[asked:], [("/v1/lends/theirs/approve", "application/json", {"token": LISTED})])
-check("and keeps it to that", (got["ok"], got["said"], fake.approved),
-      (True, "theirs is kept to a program of the account root now.", ["garden", "theirs"]))
+check("a share is kept only to a process of this account's: the token alone is refused, svrngs not asked",
+      (got["ok"], posted()[asked:], fake.approved), (False, [], ["garden"]))
 # svrngs's refusals, as its approve route answers them (surface.rs:177-208,
 # share.rs:276-288, door.rs:287 at 0b36268e): 403, its words in `error`.
 for args, said in ((["--token", "1e" * 32, "--pid", "4242@987654"], "svrngs can't share port 3000: what answers on port 3000 changed; choose it again."),
@@ -646,7 +644,7 @@ for args, said in ((["--token", "1e" * 32, "--pid", "4242@987654"], "svrngs can'
     check(f"svrngs's refusal is said as it said it: …{said[30:62]}…", (got["ok"], got["said"]), (False, said))
 got, _ = run(home, "approve", "notes", "--token", LISTED, "--pid", "4242@987654")
 check("a share svrngs doesn't have: its words", (got["ok"], got["said"]), (False, "nothing is shared from a port here by the name notes"))
-check("nothing it refused is approved", fake.approved, ["garden", "theirs"])
+check("nothing it refused is approved", fake.approved, ["garden"])
 for args in (["garden"], ["garden", "--pid", "4242@987654"],
              ["garden", "--token", "--pid", "4242@987654"], ["garden", "--token", "0f 0f", "--pid", "4242@987654"],
              ["garden", "--token", LISTED, "--pid", "4242"], ["garden", "--token", LISTED, "--pid"],

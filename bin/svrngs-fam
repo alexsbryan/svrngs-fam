@@ -10,11 +10,11 @@ Verbs:
                                   lends and what listens on this computer,
                                   --here only what listens on this computer
   share <port> <group> <name> [--program <kind>] [--pid <pid>@<start>] [--password-stdin]
-  approve <name> --token <token> [--pid <pid>@<start>]
+  approve <name> --token <token> --pid <pid>@<start>
                                   keeps sharing a held share to what its row
                                   showed answering on its port: the token
                                   the row was listed with, and the process
-                                  its line named, if it named one
+                                  of this account's its line named
   unshare <name> [--group <group>]
   models [--skip <label,...>]     friends' lends that answer OpenAI's
                                   v1/models, each with the address to use;
@@ -352,18 +352,20 @@ def svrngs_now(row, port):
     holds, as svrngs read it for the lend's row (svrngs door.rs `offered`),
     the read its token names: what its line shows, and what Keep sharing it
     approves. None when nothing answers there: svrngs named nothing and its
-    port took no connection. Else what svrngs names first: a program, by
-    the program and the whole folder svrngs read, never by a process title
-    the program sets itself or the folder's last name, which two projects
-    may share; or another account's, by its name (`account_name`) and with
-    no process, which the token alone approves. Its `said` names every one
-    svrngs listed, which is what the token approves, as svrngs's home page
-    says them (lent-row.js `answering`). Or
-    OTHER when the panel doesn't lend what answers: svrngs gave no token for
-    it, so approving it wouldn't be taken (svrngs share.rs `approve`, the
-    one decider, which approves another account's program on Linux and
-    refuses one on a Mac); a program on the deny list; or an answer svrngs
-    couldn't name."""
+    port took no connection. Else, when every one svrngs names is a program
+    of this account, the first: by its process, which Keep sharing it keeps
+    the share to, and by the program and the whole folder svrngs read, never
+    by a process title the program sets itself or the folder's last name,
+    which two projects may share. When another account's program is among
+    them, that account, by its name (`account_name`), and no process: the
+    panel lends only this account's programs, as Lend does (`lendable`), so
+    nothing here keeps the share to it, though svrngs would approve it by
+    the token alone on Linux. Its `said` names every one svrngs listed, as
+    svrngs's home page says them (lent-row.js `answering`). Or OTHER when
+    the panel doesn't lend what answers and says no more of it: svrngs gave
+    no token for it, so approving it wouldn't be taken (svrngs share.rs
+    `approve`, the one decider); a program on the deny list; or an answer
+    svrngs couldn't name."""
     answers = row["answers"]
     if not answers:
         return None if row.get("answering") is False else OTHER
@@ -373,8 +375,9 @@ def svrngs_now(row, port):
     if kept_back(port) or any(kept_back(port, a["program"], command_of(a["pid"])) for a in programs):
         return OTHER
     first, said = answers[0], answered(answers)
-    if "pid" not in first:
-        return {**OTHER, "account": account_name(first["account"]), "said": said}
+    accounts = [a for a in answers if "pid" not in a]
+    if accounts:
+        return {**OTHER, "account": account_name(accounts[0]["account"]), "said": said}
     return {"pid": first["pid"], "start": first["start"], "program": text(first["program"]),
             "folder": text(first.get("folder") or ""), "said": said}
 
@@ -643,21 +646,19 @@ def run_svrngs(args, stdin="", raw=False, older=()):
 def keep_sharing(name, shown, process):
     """Keep sharing the lend `name` to what its row showed answering on its
     port: `shown`, the token the row was listed with, and the process its
-    line named, `<pid>@<start>`, or None where it named another account's
-    program, which the token alone approves. svrngs approves that only
-    while what answers is what the row listed and, given a process, every
-    socket there is that process's or a child's, and changes nothing else
-    of the share (svrngs surface.rs `approve`, share.rs `approve`). A pid
-    and its start are sent together or not at all: svrngs refuses half of
-    one. Asked of the API with the token, as svrngs's home page asks it."""
+    line named, `<pid>@<start>`, a program of this account (`svrngs_now`).
+    svrngs approves that only while what answers is what the row listed and
+    every socket there is that process's or a child's, so never another
+    account's, and changes nothing else of the share (svrngs surface.rs
+    `approve`, share.rs `approve`; eudoxia binding.rs `approve`). A pid
+    and its start are sent together, as svrngs takes them. Asked of the API
+    with the token, as svrngs's home page asks it."""
     held, refused = connected()
     if refused:
         return refused
     at, secret = held
-    asked = {"token": shown}
-    if process is not None:
-        pid, start = (int(n) for n in process.split("@"))
-        asked.update(pid=pid, start=start)
+    pid, start = (int(n) for n in process.split("@"))
+    asked = {"token": shown, "pid": pid, "start": start}
     try:
         status, answer = request(at, secret, "POST", f"/v1/lends/{name}/approve", asked)
     except Stopped:
@@ -1057,11 +1058,14 @@ def main(argv):
         at = rest.index("--token") + 1 if "--token" in rest else len(rest)
         if at >= len(rest) or not LISTED_WITH.fullmatch(rest[at]):
             return {"ok": False, "said": "approve wants the token its row was listed with: --token <token>"}
-        pid = None
-        if "--pid" in rest:
-            pid, refused = process_of(rest)
-            if refused:
-                return refused
+        # Only ever to a process of this account's, by its pid and start:
+        # never the token alone, which svrngs would take for another
+        # account's program on Linux.
+        if "--pid" not in rest:
+            return {"ok": False, "said": "approve wants the program of yours to keep sharing it to: --pid <pid>@<start>"}
+        pid, refused = process_of(rest)
+        if refused:
+            return refused
         return keep_sharing(rest[0], rest[at], pid)
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]

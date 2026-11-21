@@ -8,7 +8,7 @@ Lend the app you're running, use your friends' models, and open what your
 groups share, from one icon.
 
 Nothing is lent until you say yes twice, and a share svrngs closes stays
-closed until you choose what it shares. Your svrngs key stays on your
+closed until you keep it to a program of yours. Your svrngs key stays on your
 computer, and the plugin sits idle while its panel is closed.
 
 ![The svrngs panel, open on a group called House](preview.png)

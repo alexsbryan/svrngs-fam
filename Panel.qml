@@ -10,8 +10,9 @@ import "Model.js" as Model
 // this computer lends, the models your people lend, and your groups.
 // Every string from svrngs or a friend is drawn as plain text, and nothing
 // is lent without a second press. A lend svrngs holds closed is kept to
-// what answers on its port now with one, Keep sharing it, beside the words
-// that say what that is.
+// a program of yours that answers on its port now with one, Keep sharing
+// it, beside the words that say what that is; another account's program
+// there is named, and never offered.
 //
 // Laid out for someone in many groups (the study "svrngs panel at scale",
 // after svrngs V1.9's home page): a group is one line until it is opened,
@@ -203,7 +204,8 @@ Panel {
   }
 
   // Under a held lend's line, for any reason it is held: what svrngs read
-  // answering on its port, which Keep sharing it would keep sharing, or that
+  // answering on its port, which Keep sharing it would keep sharing; another
+  // account's program there, named, with how to get the share back; or that
   // svrngs couldn't read it, said apart from nothing answering.
   function nowWords(l) {
     if (l.held === "") return ""
@@ -211,6 +213,7 @@ Panel {
     var now = l.now
     if (l.unread !== "") said.push(strings.t("here.nowUnread"))
     else if (now !== null && !now.running) said.push(strings.t("here.nowNothing"))
+    else if (now !== null && now.account !== "") said.push(strings.t("here.nowAccount").arg(now.said))
     else if (now !== null && !now.keep) said.push(strings.t("here.nowOther"))
     else if (now !== null) said.push(strings.t("here.now").arg(now.said))
     return said.join(" ")

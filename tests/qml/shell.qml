@@ -205,17 +205,17 @@ ShellRoot {
         "Now answering: python3 in ~/tmp/odd.",
         "svrngs now keeps each share to the program you approve.",
         "Now answering: python3.",
-        "Now answering: a program of the account root and a program of the account bob.",
+        "Now answering: a program of the account root and a program of the account bob. Only your own programs can be shared from here: stop that one and start yours, or press Stop and lend yours again.",
         "svrngs couldn't read what answers on its port. Open this panel again to look again.",
         ""]))
       check("each keeps the token its row was listed with", JSON.stringify(barPanel.lent.map(function(l) { return l.token })),
             JSON.stringify(["t1", "", "t3", "t4", "t6", "", "", "t8", "", ""]))
-      check("Keep sharing it wherever svrngs listed a token, for any reason it holds the lend, unless the panel never lends what answers",
+      check("Keep sharing it wherever svrngs listed a token for a program of yours, for any reason it holds the lend, unless the panel never lends it",
             JSON.stringify(barPanel.stops.filter(function(s) { return /^(stop|keep):/.test(s) })),
             JSON.stringify(["stop:garden", "keep:garden", "stop:quiet", "stop:theirs", "stop:odd", "keep:odd", "stop:shaped", "keep:shaped",
-              "stop:unread", "stop:untold", "stop:account", "keep:account", "stop:lost", "stop:notes"]))
-      check("another account's program is kept by the token alone, no process named",
-            JSON.stringify(Model.approveArgs(barPanel.lent[7])), JSON.stringify(["approve", "account", "--token", "t8"]))
+              "stop:unread", "stop:untold", "stop:account", "stop:lost", "stop:notes"]))
+      check("another account's program, though svrngs listed a token for it, offers no Keep sharing it", Model.keepable(barPanel.lent[7]), false)
+      check("and pressing it anyway asks nothing", (function() { barPanel.keep(barPanel.lent[7]); return fam.doing })(), "")
       var twice = JSON.parse(JSON.stringify(kept))
       twice.groups = running.groups.slice(0, 2).map(function(g) { return Object.assign({}, g, { person: "LittleMac" }) })
       twice.lends.g2 = { lent: [Object.assign({}, kept.lends.g1.lent[0], { token: "t9", now: { pid: 99, start: 98, program: "puma", folder: "~/my-garden" } })], unanswered: [] }
