@@ -315,6 +315,22 @@ function groupSummary(view, words) {
   return view.unanswered.length > 0 ? said + " · " + words.quiet.replace("%1", view.unanswered.length) : said
 }
 
+// What Play says of a friend's lend (the helper's `plays_of`, svrngs GET
+// /v1/play): the row of the lend `m` names, by its lender's key and its
+// name, or null when Play is off for it or svrngs couldn't say. Its `open`
+// is "at" while it is open at its address.
+function playOf(answer, m) {
+  var plays = running(answer) && answer.play ? answer.play : []
+  for (var i = 0; i < plays.length; i++) if (plays[i].key === m.key && plays[i].name === m.name) return plays[i]
+  return null
+}
+
+// The helper's argv to turn Play on, or off, for a friend's model `m`: on,
+// the helper copies the address svrngs opens it at.
+function playArgs(m, off) {
+  return ["play", m.key, m.name].concat(off ? ["--off"] : [])
+}
+
 // Whether a model matches what is typed.
 function modelShown(model, query) {
   var q = String(query || "").trim().toLowerCase()

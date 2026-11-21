@@ -447,6 +447,56 @@ ShellRoot {
       barPanel.askLend(barPanel.offers[0])
       check("a new question asks no program until svrngs does", [barPanel.askProgram, barPanel.lendProgram].join(","), "false,")
       barPanel.lending = null
+      copied()
+    }
+
+    // Copy address on a friend's model: Play turned on for that lend, which
+    // lets this account's programs in at its address with no key, then the
+    // address svrngs answered copied (svrngs play.rs).
+    function copied() {
+      console.log("Copy address turns Play on for a friend's model")
+      show(running)
+      fam.models = [{ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
+      barPanel.copyAddress(fam.models[0])
+      check("the helper is asked to turn Play on for it, by its computer's key and its name",
+            JSON.stringify(fam.lastAsked), JSON.stringify(["play", "kfedora", "coder"]))
+      check("it runs", fam.doing, "copy:abc123")
+      settle.then = harness.copiedAfter
+      settle.start()
+    }
+
+    function copiedAfter() {
+      check("refused, the helper's words are said as a failure", fam.saidOk, false)
+      show(running)
+      fam.replied("copy:abc123", { ok: true, at: "http://abc123.localhost:41097/", address: "http://abc123.localhost:41097/v1", said: "Copied." })
+      check("copied, it says the app needs no key, any text if it insists, and how to stop", fam.said,
+            "Copied http://abc123.localhost:41097/v1, its OpenAI-compatible address for an app on this computer. It needs no key: if the app asks for one, type any text. Until you press Stop, here or on your home page, any program of yours here can use it as you.")
+      check("never svrngs's own key", fam.said.indexOf(".svrngs/token") < 0 && fam.said.indexOf("token") < 0, true)
+      var playing = JSON.parse(JSON.stringify(running))
+      playing.play = [{ key: "kfedora", name: "coder", at: "http://abc123.localhost:41097/", open: "at", said: "Connect to http://abc123.localhost:41097/." }]
+      show(playing)
+      check("its row says Play is on", barPanel.modelNote(fam.models[0]), "Play is on: any program of yours here can use it")
+      check("with its Stop beside Copy address", JSON.stringify(barPanel.stops.filter(function(s) { return /^(copy|unplay):/.test(s) })),
+            JSON.stringify(["copy:abc123", "unplay:abc123"]))
+      playing.play[0].open = "apart"
+      playing.play[0].said = "Closed: you and its lender are in no group together now."
+      show(playing)
+      check("closed where Play opened it, its row says svrngs's words, and keeps its Stop",
+            [barPanel.modelNote(fam.models[0]), barPanel.stops.indexOf("unplay:abc123") >= 0].join("|"),
+            "Closed: you and its lender are in no group together now.|true")
+      barPanel.activate("unplay:abc123")
+      check("Stop asks the helper to turn Play off for it", JSON.stringify(fam.lastAsked), JSON.stringify(["play", "kfedora", "coder", "--off"]))
+      settle.then = harness.copiedStopped
+      settle.start()
+    }
+
+    function copiedStopped() {
+      fam.replied("unplay:abc123", { ok: true, said: "Play is off for coder." })
+      check("stopped, it says so", fam.said, "Stopped: Play is off for it.")
+      show(running)
+      check("with Play off, its row says nothing of it and has no Stop",
+            [barPanel.modelNote(fam.models[0]), barPanel.stops.indexOf("unplay:abc123")].join("|"), "|-1")
+      fam.said = ""
       finish()
     }
 
@@ -455,12 +505,7 @@ ShellRoot {
       show(running)
       barPanel.lending = null
       barPanel.inviting = ""
-      fam.models = [{ person: "Fedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
-      barPanel.copyAddress(fam.models[0])
-      check("Copy address never tells you to give an app svrngs's own key, which acts as you in every group",
-            [fam.said.indexOf(".svrngs/token") < 0, /as the key/.test(fam.said)].join(","), "true,false")
-      check("and says what the address is for", fam.said.indexOf("OpenAI-compatible address") >= 0, true)
-      fam.said = ""
+      fam.models = [{ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
       check("groups start closed: a stop each", JSON.stringify(barPanel.stops), JSON.stringify(
         ["stop:notes", "lend:3000", "copy:abc123", "group:g1", "group:g2"]))
       check("no cursor until a key moves it", barPanel.currentStop, "")

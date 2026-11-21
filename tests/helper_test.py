@@ -38,6 +38,9 @@ def unnamed():
 
 
 UNNAMED = unnamed()
+# What the helper says to an svrngs older than the panel needs: 1.13.3
+# carries the update floor and Play at a lend's address.
+NEWER = "This needs svrngs 1.13.3 or later. Update svrngs on its home page, then try again."
 
 
 def check(name, got, want):
@@ -555,9 +558,9 @@ home = case("models: what is known is not asked; not reached is not known")
 fake = Fake()
 data_dir(home, port=fake.port)
 fake.lends = {"lent": [
-    {"person": "Fedora", "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
-    {"person": "Fedora", "name": "flash", "kind": "spot", "origin": f"http://down1.localhost:{fake.port}/"},
-    {"person": "Fedora", "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
+    {"person": "Fedora", "key": "d" * 64, "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
+    {"person": "Fedora", "key": "d" * 64, "name": "flash", "kind": "spot", "origin": f"http://down1.localhost:{fake.port}/"},
+    {"person": "Fedora", "key": "d" * 64, "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
 ]}
 fake.models = {"model1": ["qwen3-coder"]}
 fake.down = {"down1"}
@@ -567,6 +570,54 @@ check("a lend named in --skip is listed, not asked", (said["coder"], any(s["head
 check("one not reached (502) is not known", said["flash"], None)
 check("one that answered with no models is known as none", said["garden"], [])
 fake.close()
+
+home = case("Copy address: Play on for a friend's model, its address copied")
+fake = Fake()
+data_dir(home, port=fake.port)
+FEDORA = "d" * 64
+fake.playable = {(FEDORA, "coder"): "model1"}
+fake.lends = {"lent": [{"person": "Fedora", "key": FEDORA, "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"}]}
+fake.models = {"model1": ["qwen3-coder"]}
+got, _ = run(home, "models")
+check("each model names its lender's computer and its lend, which Play is asked for by", [(m.get("key"), m["name"]) for m in got["models"]], [(FEDORA, "coder")])
+played = lambda: [(s["headers"].get("Content-Type"), json.loads(s["body"])) for s in fake.seen if s["path"] == "/v1/play" and "body" in s]
+got, said = run(home, "play", FEDORA, "coder")
+check("svrngs is asked to turn Play on for that lend, by its computer's key and its name, and nothing else",
+      played(), [("application/json", {"on": {"key": FEDORA, "name": "coder"}})])
+check("as an app on this computer: with the token, never an Origin",
+      [(s["headers"].get("Authorization"), "Origin" in s["headers"]) for s in fake.seen if s["path"] == "/v1/play"], [(f"Bearer {TOKEN}", False)])
+check("the address svrngs answered is copied, with v1 on its end, as an OpenAI-compatible app takes it",
+      (got["ok"], (home / "clipboard").read_text() if (home / "clipboard").exists() else None), (True, f"http://model1.localhost:{fake.port}/v1"))
+check("and said, with the token never in it", (got.get("address"), TOKEN in said), (f"http://model1.localhost:{fake.port}/v1", False))
+check("a full read says what has Play on, as svrngs says it", state(home, "--full").get("play"),
+      [{"key": FEDORA, "name": "coder", "at": f"http://model1.localhost:{fake.port}/", "open": "at",
+        "said": f"Connect to http://model1.localhost:{fake.port}/."}])
+(home / "clipboard").unlink(missing_ok=True)
+fake.opens = {(FEDORA, "coder"): {"is": "apart"}}
+got, _ = run(home, "play", FEDORA, "coder")
+check("closed where Play opened it: svrngs's words, and nothing copied", (got["ok"], got["said"], (home / "clipboard").exists()),
+      (False, "Closed: you and its lender are in no group together now.", False))
+check("and a full read says so", [p["open"] for p in state(home, "--full")["play"]], ["apart"])
+fake.opens = {(FEDORA, "coder"): {"at": "http://model1.localhost:1/"}}
+got, _ = run(home, "play", FEDORA, "coder")
+check("open at an address that isn't its lend's here: nothing copied", (got["ok"], (home / "clipboard").exists()), (False, False))
+fake.opens = {}
+got, _ = run(home, "play", FEDORA, "garden")
+check("a lend not lent to this computer: svrngs's words", (got["ok"], got["said"]), (False, "garden is not lent to this computer now"))
+got, _ = run(home, "play", FEDORA, "coder", "--off")
+check("Stop turns it off", (got["ok"], played()[-1][1], fake.playing), (True, {"off": {"key": FEDORA, "name": "coder"}}, []))
+for args in (("notakey", "coder"), (FEDORA, "co der"), (FEDORA,), ()):
+    asked = len(played())
+    got, _ = run(home, "play", *args)
+    check(f"play {' '.join(args)[:24]!r}: refused, svrngs not asked", (got["ok"], len(played()) - asked), (False, 0))
+fake.close()
+for mode in ("port-play", "old"):
+    fake = Fake(mode)
+    fake.playable = {(FEDORA, "coder"): "model1"}
+    data_dir(home, port=fake.port)
+    got, _ = run(home, "play", FEDORA, "coder")
+    check(f"an svrngs whose Play opens no lend at an address ({mode}): what to do", (got["ok"], got["said"]), (False, NEWER))
+    fake.close()
 
 home = case("open: in the browser, signed in")
 fake = Fake()
@@ -635,9 +686,6 @@ for bad in ("42; rm", "4242", "4242@", "@99", "4242@99@1"):
     got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", bad)
     check(f"--pid {bad!r}, not a process and its start, is refused, svrngs not run",
           (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (False, ["--pid", "4242@987654"]))
-# What the helper says to an svrngs older than the panel needs: 1.13.3
-# carries the update floor and Play at a lend's address.
-NEWER = "This needs svrngs 1.13.3 or later. Update svrngs on its home page, then try again."
 for old in ("1.12.1", "1.12.2"):
     (home / "old-svrngs").write_text(old)
     got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")

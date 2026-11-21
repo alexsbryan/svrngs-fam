@@ -1,6 +1,6 @@
 """A stand-in for svrngs's API, as the helper meets it: a loopback HTTP server
-that answers `/v1/groups`, `/v1/lends` and `POST /v1/lends/<name>/approve`
-only with the right bearer token, and refuses any request carrying `Origin`
+that answers `/v1/groups`, `/v1/lends`, `POST /v1/lends/<name>/approve` and
+`/v1/play` only with the right bearer token, and refuses any request carrying `Origin`
 or `Sec-Fetch-Site`, as svrngs does (svrngs api.rs:199-210). `mode` makes it
 answer the ways svrngs can go wrong, and "old" as an svrngs from before
 approving, which has no approve route (surface.rs `router` at v1.12.2).
@@ -62,6 +62,13 @@ class Fake:
         # holding it (pid: start) and what svrngs shows of them.
         self.ports = {}
         self.approved = []
+        # Play (svrngs play.rs at 2fe16c08): the friends' lends at an address
+        # it turns on, (key, name): their label; how each is open, play.rs
+        # `Open`'s `is`, and where, when the test says otherwise; and what
+        # has Play on now, in order.
+        self.playable = {}
+        self.opens = {}
+        self.playing = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -98,6 +105,8 @@ class Fake:
                     return self.answer(404, b"Not Found", "text/plain")
                 if self.path == "/v1/groups":
                     return self.answer(200, GROUPS)
+                if self.path == "/v1/play":
+                    return self.answer(200, fake.plays())
                 if self.path.startswith("/v1/lends?namespace=") and fake.delay:
                     time.sleep(fake.delay)
                 if self.path.startswith("/v1/lends?namespace="):
@@ -120,6 +129,8 @@ class Fake:
                 named = re.fullmatch(r"/v1/lends/([^/?]+)/approve", self.path)
                 if named and fake.mode != "old":
                     return self.approve(named.group(1), body)
+                if self.path == "/v1/play" and fake.mode != "old":
+                    return self.play(body)
                 # axum's own answer to a route it doesn't have: 404, no body.
                 return self.answer(404, b"", "text/plain")
 
@@ -147,9 +158,42 @@ class Fake:
                 fake.approved.append(name)
                 return self.answer(200, {"name": name, "answers": lend["answers"]})
 
+            def play(self, body):
+                """svrngs play.rs `turn`: `{"on"|"off": {"key", "name"}}`,
+                answered by what has Play on then; a lend not lent to this
+                computer refused 409, in 1.13.3's words, or with mode
+                "port-play" in 1.13.2's, whose Play turned on ports alone."""
+                try:
+                    (turn, lend), = json.loads(body).items()
+                    key, name = lend["key"], lend["name"]
+                except (ValueError, AttributeError, KeyError, TypeError):
+                    return self.answer(422, b"Failed to deserialize the JSON body", "text/plain")
+                if turn == "off":
+                    fake.playing = [p for p in fake.playing if p != (key, name)]
+                    return self.answer(200, fake.plays())
+                if fake.mode == "port-play" or (key, name) not in fake.playable:
+                    how = " as a port" if fake.mode == "port-play" else ""
+                    return self.answer(409, {"error": f"{name} is not lent to this computer{how} now"})
+                if (key, name) not in fake.playing:
+                    fake.playing.append((key, name))
+                return self.answer(200, fake.plays())
+
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def plays(self):
+        """What has Play on, each as svrngs play.rs `Playing` answers it: at
+        its lend's address here, unless `opens` says otherwise."""
+        said = {"at": "Connect to {}.", "apart": "Closed: you and its lender are in no group together now."}
+        out = []
+        for key, name in self.playing:
+            opened = {"is": "at", "at": f"http://{self.playable.get((key, name), 'x')}.localhost:{self.port}/",
+                      **self.opens.get((key, name), {})}
+            out.append({"person": "Fedora", "key": key, "name": name, "at": opened["at"],
+                        "open": {"is": "at", "words": None} if opened["is"] == "at" else {"is": opened["is"]},
+                        "said": said[opened["is"]].format(opened["at"])})
+        return out
 
     def close(self):
         self.server.shutdown()

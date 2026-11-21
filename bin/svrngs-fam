@@ -19,8 +19,13 @@ Verbs:
                                   of this account's its line named
   unshare <name> [--group <group>]
   models [--skip <label,...>]     friends' lends that answer OpenAI's
-                                  v1/models, each with the address to use;
+                                  v1/models, each with its lender's key, which
+                                  Play is asked by;
                                   those named in --skip are listed, not asked
+  play <key> <name> [--off]       Play on for a friend's lend at an address,
+                                  so this account's programs reach it there
+                                  with no key, and that address copied with
+                                  v1 on its end; --off turns it off
   open [--lend <label>] [--at <path>]
                                   opens it in the browser, signed in
   link <group>                    makes a new invite link and copies it
@@ -488,6 +493,8 @@ def state(full):
             asked = [g["id"] for g in report["groups"] if not g["left"]]
             with ThreadPoolExecutor(max_workers=8) as pool:
                 report["lends"] = dict(zip(asked, pool.map(lambda ns: lends_of(at, secret, ns), asked)))
+            # What has Play on, so a friend's model's line says so.
+            report["play"] = plays_of(at, secret)
             # A held lend of this computer's, as its line shows it: what
             # svrngs read answering on its port for that row. Only a row
             # of this computer's key: a display name is anyone's to take.
@@ -705,6 +712,81 @@ def lend(args, process, program, secret, older):
             "said": f"svrngs doesn't know what answers on port {args[1]}. Say which program it is, then press Lend again."}
 
 
+# Where a lend with Play on is, as svrngs says it (play.rs `Open`, by its
+# `is`, a closed set): open at its address, or closed and why. One this
+# helper doesn't know, from a newer svrngs, is "unknown", and not open.
+OPENS = ("at", "apart", "unread", "unopened", "taken")
+
+
+def plays_of(at, secret):
+    """What has Play on (svrngs GET /v1/play, play.rs `Playing`): each by its
+    lender's key and its name, where a program reaches it (`at`), whether
+    it is open there (`open`) and svrngs's words for it. None when svrngs
+    couldn't say, which is never read as nothing on."""
+    try:
+        answer = ask(at, secret, "GET", "/v1/play")
+    except (Stopped, Unreadable):
+        return None
+    if not isinstance(answer, list):
+        return None
+    found = []
+    for p in rows(answer)[0]:
+        if not isinstance(p, dict) or key_of(p.get("key")) is None:
+            continue
+        opened = p.get("open").get("is") if isinstance(p.get("open"), dict) else None
+        found.append({"key": p["key"], "name": text(p.get("name")), "at": text(p.get("at")),
+                      "open": opened if opened in OPENS else "unknown", "said": text(p.get("said"))})
+    return found
+
+
+def play(key, name, off):
+    """Play turned on, or `off`, for the lend `name` of the computer whose
+    key is `key` (svrngs POST /v1/play, play.rs `turn`). While it is on, the
+    lend's address here, http://<label>.localhost:<svrngs's port>/, lets in
+    a program of this account with no key, and takes off any key it sends
+    unread (play.rs `shown`); so an app is never given svrngs's token.
+    Turned on, the address svrngs answers is copied with v1 on its end, as
+    an OpenAI-compatible app takes it, only if it is open there and that
+    address is the lend's own on this computer (`lend_at`). An svrngs whose
+    Play opens no lend at an address, 1.13.2 and before, is told to update
+    (NEWER)."""
+    held, refused = connected()
+    if refused:
+        return refused
+    at, secret = held
+    try:
+        status, answer = request(at, secret, "POST", "/v1/play", {"off" if off else "on": {"key": key, "name": name}})
+    except Stopped:
+        return {"ok": False, "said": "svrngs isn't running"}
+    except Unreadable as e:
+        return {"ok": False, "said": str(e)}
+    said = answer.get("error") if isinstance(answer, dict) else None
+    # Before 1.13.3, Play turned on ports alone (play.rs `turn` at v1.13.2:
+    # "… is not lent to this computer as a port now"), and before 1.13.0
+    # there was no such route: axum's own 404, with no words.
+    if status in (404, 405) and not isinstance(said, str) or isinstance(said, str) and "as a port now" in said:
+        return {"ok": False, "said": NEWER}
+    if status != 200 or not isinstance(answer, list):
+        return {"ok": False, "said": text(said).strip() if isinstance(said, str) and said.strip() else f"svrngs answered {status} and turned nothing"}
+    row = next((p for p in answer if isinstance(p, dict) and p.get("key") == key and p.get("name") == name), None)
+    if off:
+        if row is not None:
+            return {"ok": False, "said": f"svrngs still has Play on for {name}"}
+        return {"ok": True, "said": f"Play is off for {name}."}
+    opened = row.get("open") if row else None
+    if not isinstance(opened, dict) or opened.get("is") != "at":
+        words = row.get("said") if row else None
+        return {"ok": False, "said": text(words) if isinstance(words, str) and words else f"svrngs didn't open {name} with Play"}
+    address = row.get("at")
+    if not isinstance(address, str) or lend_at(address, at[1]) is None:
+        return {"ok": False, "said": f"svrngs opened {name} somewhere other than its address on this computer, so nothing was copied"}
+    copier = shutil.which("wl-copy")
+    if copier is None:
+        return {"ok": False, "said": f"Play is on for {name}, but wl-copy isn't installed, so its address wasn't copied: {address}v1"}
+    subprocess.run([copier], input=address + "v1", text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    return {"ok": True, "at": address, "address": address + "v1", "said": f"Copied {address}v1."}
+
+
 def keep_sharing(name, shown, process):
     """Keep sharing the lend `name` to what its row showed answering on its
     port: `shown`, the token the row was listed with, and the process its
@@ -805,9 +887,11 @@ def models(skip=frozenset()):
             if not isinstance(l, dict) or me is not None and key_of(l.get("key")) == me or l.get("answering") is False or held_of(l.get("held")):
                 continue
             label = lend_at(l.get("origin"), at[1])
-            if label and label not in candidates:
+            if label and label not in candidates and key_of(l.get("key")):
                 candidates[label] = {
                     "person": text(l.get("person")),
+                    # Its lender's computer, which Play is turned on by.
+                    "key": key_of(l.get("key")),
                     "name": text(l.get("name")),
                     "group": text(g.get("name")),
                     "label": label,
@@ -1142,6 +1226,11 @@ def main(argv):
         if "--group" in rest:
             args += ["--group", rest[rest.index("--group") + 1]]
         return run_svrngs(args)
+    if verb == "play" and len(rest) >= 2:
+        key, name = rest[:2]
+        if key_of(key) is None or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", name):
+            return {"ok": False, "said": f"not a lend's computer and name: {text(key)} {text(name)}"}
+        return play(key, name, off="--off" in rest[2:])
     if verb == "models":
         skip = rest[rest.index("--skip") + 1].split(",") if "--skip" in rest and rest.index("--skip") + 1 < len(rest) else []
         return models(set(skip))

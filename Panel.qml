@@ -94,7 +94,7 @@ Panel {
       offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
       if (lending) out = out.concat(groups.length > 1 ? ["lend:group"] : [], ["lend:confirm", "lend:cancel"])
     }
-    shownModels.forEach(function(m) { out.push("copy:" + m.label) })
+    shownModels.forEach(function(m) { out.push("copy:" + m.label); if (Model.playOf(fam.answer, m)) out.push("unplay:" + m.label) })
     groups.forEach(function(g) {
       var view = views[g.id]
       if (!view || !view.shown) return
@@ -124,7 +124,12 @@ Panel {
 
   Connections {
     target: fam
-    function onReplied(key, reply) { if (key === "lend") root.lendAnswered(reply) }
+    function onReplied(key, reply) {
+      if (key === "lend") root.lendAnswered(reply)
+      // Play's answers in the panel's own words, svrngs's when it refused.
+      else if (/^copy:/.test(key) && reply.ok === true) fam.tell(strings.t("models.copied").arg(String(reply.address)), true)
+      else if (/^unplay:/.test(key) && reply.ok === true) fam.tell(strings.t("models.unplayed"), true)
+    }
   }
 
   onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; cursorActive = false; cursor = 0; query = "" }
@@ -167,6 +172,7 @@ Panel {
       if (offer) { askLend(offer); cursorTo("lend:confirm") }
     }
     else if (kind === "copy") copyAddress(fam.models.filter(function(m) { return m.label === rest })[0])
+    else if (kind === "unplay") unplay(fam.models.filter(function(m) { return m.label === rest })[0])
     else if (kind === "group") { toggleGroup(rest); cursorTo(stop) }
     else if (stop === "invite:confirm") invite(inviting)
     else if (stop === "invite:cancel") inviting = ""
@@ -265,10 +271,25 @@ Panel {
     if (fam.act("invite:" + groupId, ["link", groupId])) inviting = ""
   }
 
+  // Copy address: Play turned on for that lend, so a program of yours
+  // reaches it at its address here with no key, then the address svrngs
+  // opened it at copied (the helper's `play`). Never svrngs's own key.
   function copyAddress(model) {
-    if (!model) return
-    Quickshell.execDetached(["wl-copy", "--", model.address])
-    fam.tell(strings.t("models.copied"), true)
+    if (model) fam.act("copy:" + model.label, Model.playArgs(model, false))
+  }
+
+  function unplay(model) {
+    if (model) fam.act("unplay:" + model.label, Model.playArgs(model, true))
+  }
+
+  // Under a friend's model: its own names, when they say more than the
+  // lend's, and whether Play is on for it: open, or svrngs's words for
+  // where it is closed.
+  function modelNote(m) {
+    var ids = m.models.join(", ") === m.name ? "" : m.models.join(", ")
+    var played = Model.playOf(fam.answer, m)
+    var play = played === null ? "" : played.open === "at" ? strings.t("models.playing") : played.said
+    return [ids, play].filter(function(w) { return w !== "" }).join(" · ")
   }
 
   // svrngs's own installer, run by the helper once its signature verifies
@@ -685,12 +706,19 @@ Panel {
               Line {
                 required property var modelData
                 words: strings.t("models.row").arg(modelData.name).arg(modelData.person)
-                // The model's own names, when they say more than the lend's.
-                note: modelData.models.join(", ") === modelData.name ? "" : modelData.models.join(", ")
+                note: root.modelNote(modelData)
                 Act {
+                  doing: "copy:" + modelData.label
                   words: strings.t("action.copyAddress")
-                  stop: "copy:" + modelData.label
+                  stop: doing
                   onClicked: root.copyAddress(modelData)
+                }
+                Act {
+                  visible: Model.playOf(fam.answer, modelData) !== null
+                  doing: "unplay:" + modelData.label
+                  words: strings.t("action.stop")
+                  stop: doing
+                  onClicked: root.unplay(modelData)
                 }
               }
             }
