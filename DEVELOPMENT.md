@@ -22,7 +22,10 @@ stand-in svrngs, Get svrngs against a stand-in release, and the panel
 itself offscreen, which needs Omarchy's shell. No test reaches the svrngs on your
 computer. The helper's test plays another account on this computer with
 `unshare --map-auto`, which needs your account to have a range in
-`/etc/subuid`, as rootless Podman does; without one, that check fails.
+`/etc/subuid`, as rootless Podman does; without one, that check fails. It
+plays a sandbox of yours with `unshare --map-root-user --mount`, and names
+a copy of its own python as svrngs's program with `SVRNGS_FAM_SERVER`,
+since its stand-in svrngs is a python one.
 
 ## Packages
 

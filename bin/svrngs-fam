@@ -165,19 +165,27 @@ def proc_address(field):
 # a new connection takes, so svrngs's own reader passes it over too (svrngs
 # uid.rs `read`).
 ESTABLISHED = "01"
+# How long, in seconds, the program at svrngs's address has to accept the
+# helper's connection, so the socket it holds can be found. svrngs accepts
+# at once: its API listens as tokio's TcpListener (api.rs `listening`),
+# which waits on no first bytes.
+ACCEPT_WITHIN = 1.0
 
 
 def taken_by(sock):
-    """The account whose socket took `sock`'s connection: the uid of its
-    other end, the row of /proc/net/tcp or tcp6 whose own address is where
-    `sock` connected, whose far one is `sock`'s, and whose state is
-    ESTABLISHED, an accepted connection's uid being its listener's. Every
-    other row is passed over. None when no such row can be read: Linux
-    lists the connection as its handshake ends, so it is looked for a few
-    times."""
+    """The server end of `sock`'s connection, (uid, inode): the account
+    whose socket took it, an accepted connection's uid being its listener's,
+    and the inode of the socket the program that accepted it holds. Read
+    from the row of /proc/net/tcp or tcp6 whose own address is where `sock`
+    connected, whose far one is `sock`'s, and whose state is ESTABLISHED;
+    every other row is passed over. Linux lists the connection as its
+    handshake ends, with inode 0 until a program accepts it, so it is looked
+    for again, waiting longer each time, for ACCEPT_WITHIN. None when no
+    such row is read by then."""
     near, far = sock.getsockname()[:2], sock.getpeername()[:2]
     want = ((ipaddress.ip_address(far[0]), far[1]), (ipaddress.ip_address(near[0]), near[1]))
-    for _ in range(5):
+    began, wait = time.monotonic(), 0.001
+    while True:
         for table in ("/proc/net/tcp", "/proc/net/tcp6"):
             try:
                 lines = Path(table).read_text().splitlines()[1:]
@@ -185,20 +193,146 @@ def taken_by(sock):
                 continue
             for line in lines:
                 f = line.split()
-                if len(f) > 7 and f[3] == ESTABLISHED and f[7].isdigit() and (proc_address(f[1]), proc_address(f[2])) == want:
-                    return int(f[7])
-        time.sleep(0.02)
+                if (len(f) > 9 and f[3] == ESTABLISHED and f[7].isdigit() and f[9].isdigit() and int(f[9])
+                        and (proc_address(f[1]), proc_address(f[2])) == want):
+                    return int(f[7]), int(f[9])
+        left = ACCEPT_WITHIN - (time.monotonic() - began)
+        if left <= 0:
+            return None
+        time.sleep(min(wait, left))
+        wait *= 2
+
+
+def svrngs_files():
+    """svrngs's own program, each file it is run from, by the path that
+    resolves to: its device and inode, or None while nothing is there. They
+    are the svrngs command this helper runs (`svrngs_command`) and where
+    svrngs's installers put it: ~/.local/bin/svrngs, which svrngs's install
+    line's service runs (svrngs web/install.sh `bin`), and /usr/bin/svrngs,
+    the svrngs-bin package's (svrngs-omarchy). SVRNGS_FAM_SERVER names one
+    file in their place, for the tests' stand-in svrngs, which their own
+    python serves: whoever sets this helper's environment names the svrngs
+    it runs (SVRNGS_FAM_SVRNGS) and the token it reads (SVRNGS_DIR) already."""
+    named = os.environ.get("SVRNGS_FAM_SERVER")
+    places = [named] if named else [svrngs_command(), str(Path.home() / ".local/bin/svrngs"), "/usr/bin/svrngs"]
+    files = {}
+    for path in {os.path.realpath(p) for p in places if p}:
+        try:
+            s = os.stat(path)
+            files[path] = (s.st_dev, s.st_ino)
+        except OSError:
+            files[path] = None
+    return files
+
+
+# How Linux names the file a process runs once that file has no name left
+# (proc(5), /proc/<pid>/exe): its last path, then this.
+DELETED = " (deleted)"
+
+
+def runs_svrngs(pid, files, here):
+    """Whether process `pid` runs svrngs's own program: the file its
+    /proc/<pid>/exe opens is one of `files` (`svrngs_files`), the very file,
+    by its device and inode, wherever that process sees it from. Or it is
+    the file one of those paths named until an update replaced it, which
+    svrngs keeps running until it restarts: svrngs's own update renames the
+    new file over it (svrngs update.rs `apply_at`), and a package's unpacks
+    the new one in its place, telling the person to run `svrngs restart`
+    (svrngs-bin.install). That file has no name left, and Linux names it by
+    its last path and DELETED; it is taken by that path only for a process
+    in this helper's own mount namespace, `here`, where a path names the
+    file this computer has there. In another, a container's or a sandbox's,
+    a program can make a file of its own at that path, run it and remove
+    it, and the name reads the same."""
+    exe = f"/proc/{pid}/exe"
+    try:
+        running = os.stat(exe)
+    except OSError:
+        return False
+    if (running.st_dev, running.st_ino) in files.values():
+        return True
+    if running.st_nlink:
+        return False
+    try:
+        shown, ns = os.readlink(exe), os.stat(f"/proc/{pid}/ns/mnt")
+    except OSError:
+        return False
+    return shown.endswith(DELETED) and shown[:-len(DELETED)] in files and (ns.st_dev, ns.st_ino) == here
+
+
+def processes():
+    """This account's processes but this one, by pid."""
+    me, self = os.getuid(), os.getpid()
+    with os.scandir("/proc") as listed:
+        for entry in listed:
+            if not entry.name.isdigit() or int(entry.name) == self:
+                continue
+            try:
+                if entry.stat().st_uid == me:
+                    yield int(entry.name)
+            except OSError:
+                continue
+
+
+def holds(pid, inode):
+    """Whether process `pid` holds the socket `inode`: one of its
+    /proc/<pid>/fd links reads socket:[<inode>] (proc(5))."""
+    want = f"socket:[{inode}]"
+    try:
+        fds = os.scandir(f"/proc/{pid}/fd")
+    except OSError:
+        return False
+    with fds:
+        for fd in fds:
+            try:
+                if os.readlink(fd.path) == want:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def holder(inode, files):
+    """The process of this account's holding the socket `inode`, and
+    whether it runs svrngs (`runs_svrngs`): those that run svrngs are looked
+    in first, so a request to svrngs reads no other's sockets. None when no
+    process this helper can read holds it."""
+    ns = os.stat("/proc/self/ns/mnt")
+    here, mine = (ns.st_dev, ns.st_ino), list(processes())
+    ours = {pid for pid in mine if runs_svrngs(pid, files, here)}
+    for pid in sorted(ours) + [p for p in mine if p not in ours]:
+        if holds(pid, inode):
+            return pid, pid in ours
     return None
+
+
+def not_svrngs(pid, port, files):
+    """What the panel says of a program of this account's that answers at
+    svrngs's address and isn't svrngs (`runs_svrngs`), by the file it runs,
+    and what to do."""
+    try:
+        shown = os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        shown = command_of(pid) or "a program"
+    if shown.endswith(DELETED) and shown[:-len(DELETED)] in files:
+        return (f"a program of yours (process {pid}) answers at svrngs's address, port {port}, from {text(shown[:-len(DELETED)])} as it was "
+                "before that file was replaced, and the panel can't tell it is svrngs, so it sent it nothing. If it is svrngs, restart it: svrngs restart")
+    return (f"{text(shown.removesuffix(DELETED))} (process {pid}), a program of yours that isn't svrngs, answers at svrngs's address, "
+            f"port {port}, so the panel sent it nothing. svrngs can't start there until that program stops")
 
 
 def dial(at, timeout=TIMEOUT):
     """A connection to svrngs's address, sent nothing yet: only once the
-    program that took it is shown to run as this account. svrngs's port is
-    free while svrngs is stopped, and any account on this computer can
-    listen there then; what is sent on it carries svrngs's token, which acts
-    as this person everywhere. Refused as Unreadable, sending nothing, when
-    another account's program took it or whose it is can't be read. Linux
-    lets no other account take the connection over once it is checked."""
+    program that took it is shown to be svrngs itself, a process of this
+    account's that runs svrngs's own program (`runs_svrngs`) and holds the
+    socket that accepted it (`holder`). svrngs's port is free while svrngs
+    is stopped, and any program on this computer can listen there then, a
+    sandbox of this account's that can't read svrngs's token among them;
+    what is sent on it carries that token, which acts as this person
+    everywhere. Refused as Unreadable, sending nothing, when another
+    account's program took it, a program that isn't svrngs did, or whose it
+    is can't be read. Linux lets no other program take the connection over
+    once it is checked."""
     host, port = at
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
@@ -207,17 +341,24 @@ def dial(at, timeout=TIMEOUT):
         raise Stopped() from None
     except OSError as e:
         raise Unreadable(f"svrngs's address did not answer: {e}") from None
+    files, held = svrngs_files(), None
     try:
-        owner = taken_by(conn.sock)
+        end = taken_by(conn.sock)
+        if end is not None and end[0] == os.getuid():
+            held = holder(end[1], files)
     except (OSError, ValueError):
-        owner = None
-    if owner == os.getuid():
+        end = None
+    if held is not None and held[1]:
         return conn
     conn.close()
-    if owner is None:
+    if end is None:
         raise Unreadable(f"the panel couldn't tell whose program answers at svrngs's address, port {port}, so it sent it nothing")
-    raise Unreadable(f"a program of the account {account_name(owner)} answers at svrngs's address, port {port}, so the panel "
-                     f"sent it nothing. svrngs can't start there until that program stops")
+    if end[0] != os.getuid():
+        raise Unreadable(f"a program of the account {account_name(end[0])} answers at svrngs's address, port {port}, so the panel "
+                         f"sent it nothing. svrngs can't start there until that program stops")
+    if held is None:
+        raise Unreadable(f"the panel couldn't tell which program of yours answers at svrngs's address, port {port}, so it sent it nothing")
+    raise Unreadable(not_svrngs(held[0], port, files))
 
 
 def request(at, secret, method, path, body=None, timeout=TIMEOUT):

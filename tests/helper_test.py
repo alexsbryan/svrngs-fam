@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import pwd
+import shutil
 import socket
 import subprocess
 import sys
@@ -110,9 +111,15 @@ STUBS = {
 }
 
 
-def run(home, *args, installed=True, data=None):
+# The program this test runs as, which serves the stand-in svrngs (Fake):
+# what the helper is told is svrngs's own program (SVRNGS_FAM_SERVER).
+SELF = os.readlink("/proc/self/exe")
+
+
+def run(home, *args, installed=True, data=None, server=SELF):
     """Run the helper as the shell does, with HOME at `home` and a PATH that
-    holds no svrngs, so `installed` decides alone whether one is found."""
+    holds no svrngs, so `installed` decides alone whether one is found, and
+    `server` as svrngs's own program."""
     if installed:
         command = home / ".local/bin/svrngs"
         command.parent.mkdir(parents=True, exist_ok=True)
@@ -127,15 +134,15 @@ def run(home, *args, installed=True, data=None):
     runtime = home / "runtime"
     runtime.mkdir(mode=0o700, exist_ok=True)
     env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime),
-           "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else ""}
+           "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else "", "SVRNGS_FAM_SERVER": str(server)}
     if data is not None:
         env["SVRNGS_DIR"] = str(data)
     done = subprocess.run([str(HELPER), *args], capture_output=True, text=True, env=env, timeout=30)
     return json.loads(done.stdout), done.stdout
 
 
-def state(home, *args, installed=True, data=None):
-    return run(home, "state", *args, installed=installed, data=data)[0]
+def state(home, *args, installed=True, data=None, server=SELF):
+    return run(home, "state", *args, installed=installed, data=data, server=server)[0]
 
 
 def listen(port, title=None, folder=None):
@@ -406,9 +413,10 @@ class Connected:
 
 
 def took(*rows):
-    """What the helper reads as having taken the connection, given `rows`."""
+    """What the helper reads as having taken the connection, given `rows`,
+    waiting no more than a twentieth of a second for one to be accepted."""
     helper = helper_module()
-    helper.Path, Listed.rows = Listed, {"/proc/net/tcp": list(rows)}
+    helper.Path, helper.ACCEPT_WITHIN, Listed.rows = Listed, 0.05, {"/proc/net/tcp": list(rows)}
     return helper.taken_by(Connected())
 
 
@@ -416,9 +424,96 @@ case("whose program took the helper's connection is read from that connection's 
 me = os.getuid()
 # An earlier connection's TIME_WAIT row (06) with the same four numbers,
 # which Linux lists as uid 0 whoever held it; then this one's (01).
-check("a TIME_WAIT row before it is passed over", took(end_row("06", 0, 0), end_row("01", me, 4242)), me)
+check("a TIME_WAIT row before it is passed over: its account, and the socket that accepted it",
+      took(end_row("06", 0, 0), end_row("01", me, 4242)), (me, 4242))
 check("a row in any other state is no program's end of it: none, never root",
       [took(end_row(state, 0, 0)) for state in ("06", "08", "0A")], [None, None, None])
+check("one no program has accepted yet, inode 0, names no socket to find: none", took(end_row("01", me, 0)), None)
+
+# svrngs's own program, as the helper is told it (SVRNGS_FAM_SERVER): a
+# copy of this test's python, which serves a stand-in svrngs where a case
+# runs it.
+PROGRAM = Path(SCRATCH.name) / "program" / "svrngs"
+PROGRAM.parent.mkdir()
+shutil.copy(SELF, PROGRAM)
+
+
+def squatted(home, squat, port):
+    """The helper's full read, what approve, open and models said, and every
+    byte `squat`, listening on svrngs's `port`, was sent, with PROGRAM as
+    svrngs's own program."""
+    try:
+        got = state(home, "--full", server=PROGRAM)
+        asked = {verb: run(home, *args, server=PROGRAM)[0] for verb, args in (
+            ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
+            ("open", ("open",)), ("models", ("models",)))}
+    finally:
+        squat.kill()
+    return got, asked, squat.communicate()[0]
+
+
+def sent_nothing(got, asked, received, why):
+    check(f"its read is unreadable, saying {why} and that it was sent nothing",
+          (got["svrngs"], why in got.get("reason", ""), "sent it nothing" in got.get("reason", "")), ("unreadable", True, True))
+    check("approve, open and models each refuse, saying so",
+          {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
+          {verb: (False, True) for verb in asked})
+    check("it was sent no byte on any connection, and never the token",
+          ([r for r in received.splitlines() if r != "b''"], TOKEN in received), ([], False))
+
+
+home = case("a program of this account's that isn't svrngs, on svrngs's port, is sent nothing")
+squat_port = closed_port()
+data_dir(home, port=squat_port)
+squat = subprocess.Popen(["python3", "-I", "-c", FOREIGN, str(squat_port)], cwd="/", stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True)
+check("this account's listener could be planted, running a program that isn't PROGRAM",
+      (squat.stdout.readline().strip(), owner_of_listener(squat_port), os.readlink(f"/proc/{squat.pid}/exe") != str(PROGRAM)),
+      ("ready", me, True))
+sent_nothing(*squatted(home, squat, squat_port), "a program of yours that isn't svrngs")
+
+# A program of this account's in a mount namespace of its own, as a
+# container's or a sandbox's is: on a tmpfs over PROGRAM's folder there, a
+# file of its own at PROGRAM's path, which it runs, then removes. Linux
+# then names what it runs by PROGRAM's path, deleted, as it names svrngs's
+# own program after an update replaced it.
+SPOOF = 'mount -t tmpfs tmpfs "$1" && cp "$2" "$3" && exec "$3" -I -c "$4" "$5" "$3"'
+UNLINKED = "import os, sys\nos.unlink(sys.argv[2])\n" + FOREIGN
+home = case("one in a mount namespace of its own, running a file it made at svrngs's path and removed, is sent nothing")
+squat_port = closed_port()
+data_dir(home, port=squat_port)
+squat = subprocess.Popen(["unshare", "--map-root-user", "--mount", "sh", "-c", SPOOF, "spoof", str(PROGRAM.parent), SELF,
+                          str(PROGRAM), UNLINKED, str(squat_port)], cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+ready = squat.stdout.readline().strip()
+check("it could be planted: this account's, named as PROGRAM deleted, in another mount namespace",
+      (ready, owner_of_listener(squat_port), os.readlink(f"/proc/{squat.pid}/exe") if ready else None,
+       ready and os.stat(f"/proc/{squat.pid}/ns/mnt").st_ino != os.stat("/proc/self/ns/mnt").st_ino),
+      ("ready", me, f"{PROGRAM} (deleted)", True))
+sent_nothing(*squatted(home, squat, squat_port), "can't tell it is svrngs")
+check("PROGRAM itself is still here, as this computer has it", PROGRAM.is_file(), True)
+
+# The stand-in svrngs served by PROGRAM, which is then replaced as svrngs's
+# own update replaces it (update.rs `apply_at`: the new file renamed over
+# the one running).
+SERVE_FAKE = "import sys, time\nsys.path.insert(0, sys.argv[1])\nfrom fake_svrngs import Fake\nprint(Fake().port, flush=True)\ntime.sleep(300)\n"
+home = case("svrngs's own program, replaced while it runs, as an update replaces it, is svrngs still")
+served = subprocess.Popen([str(PROGRAM), "-I", "-c", SERVE_FAKE, str(HERE)], cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+try:
+    data_dir(home, port=int(served.stdout.readline()))
+    before = state(home, server=PROGRAM)
+    shutil.copy(SELF, PROGRAM.with_name("svrngs.new"))
+    os.rename(PROGRAM.with_name("svrngs.new"), PROGRAM)
+    replaced = os.readlink(f"/proc/{served.pid}/exe")
+    after = state(home, server=PROGRAM)
+    elsewhere = state(home, server=SELF)
+finally:
+    served.kill()
+check("served by svrngs's own program: running", before["svrngs"], "running")
+check("its program replaced as it runs: Linux names it deleted", replaced, f"{PROGRAM} (deleted)")
+check("svrngs still, by the path it runs from, in this computer's own mount namespace: running", after["svrngs"], "running")
+check("the same server, when svrngs's own program is another file, is sent nothing",
+      (elsewhere["svrngs"], "isn't svrngs" in elsewhere.get("reason", ""), "sent it nothing" in elsewhere.get("reason", "")),
+      ("unreadable", True, True))
 
 home = case("what runs here, and what is offered")
 fake = Fake()
