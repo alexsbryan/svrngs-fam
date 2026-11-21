@@ -7,10 +7,11 @@ import "Model.js" as Model
 // svrngs's state for the bar, from the helper and from svrngs's own files.
 // It never reads the token: the helper does, and only the helper.
 //
-// While the panel is closed nothing runs. Three things keep the icon honest:
-// one read at start; the `api` file, which svrngs writes each time it starts
-// (svrngs api.rs:139-145), so a start is a file event; and `lends/`, which
-// `svrngs share` and `unshare` write, counted with no process at all.
+// While the panel is closed nothing runs on a timer. Three things keep the
+// icon honest: one read at start; a read each time the `api` file changes,
+// which svrngs writes each time it starts (svrngs api.rs:139-145), so a
+// start is a file event; and `lends/`, which `svrngs share` and `unshare`
+// write, counted with no process at all.
 //
 // How much a read asks: SHORT is svrngs's groups alone; HERE adds what
 // listens on this computer, no network; FULL adds what every group lends,
