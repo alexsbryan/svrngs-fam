@@ -35,7 +35,7 @@
   "models.asking": "Asking your people's lends…",
   "models.quiet": "None of your people's lends answered as a model just now. Their computer may be off.",
   "action.copyAddress": "Copy address",
-  "models.copied": "Copied. In your app, use it as the OpenAI-compatible address, and the text in ~/.svrngs/token as the key.",
+  "models.copied": "Copied its OpenAI-compatible address, for an app on this computer. The app also needs a key there, and svrngs has none yet that only uses models: its own key acts as you in every group.",
   "groups.title": "Your groups",
   "groups.notRunning": "Not running now",
   "groups.unanswered": "%1's computer isn't answering",

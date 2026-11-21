@@ -418,6 +418,11 @@ ShellRoot {
       barPanel.lending = null
       barPanel.inviting = ""
       fam.models = [{ person: "Fedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
+      barPanel.copyAddress(fam.models[0])
+      check("Copy address never tells you to give an app svrngs's own key, which acts as you in every group",
+            [fam.said.indexOf(".svrngs/token") < 0, /as the key/.test(fam.said)].join(","), "true,false")
+      check("and says what the address is for", fam.said.indexOf("OpenAI-compatible address") >= 0, true)
+      fam.said = ""
       check("groups start closed: a stop each", JSON.stringify(barPanel.stops), JSON.stringify(
         ["stop:notes", "lend:3000", "copy:abc123", "group:g1", "group:g2"]))
       check("no cursor until a key moves it", barPanel.currentStop, "")
