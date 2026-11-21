@@ -635,7 +635,9 @@ for bad in ("42; rm", "4242", "4242@", "@99", "4242@99@1"):
     got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", bad)
     check(f"--pid {bad!r}, not a process and its start, is refused, svrngs not run",
           (got["ok"], (home / "svrngs-argv").read_text().split()[-2:]), (False, ["--pid", "4242@987654"]))
-NEWER = "Lending from here needs svrngs 1.13.1 or later. Update svrngs on its home page, then try again."
+# What the helper says to an svrngs older than the panel needs: 1.13.3
+# carries the update floor and Play at a lend's address.
+NEWER = "This needs svrngs 1.13.3 or later. Update svrngs on its home page, then try again."
 for old in ("1.12.1", "1.12.2"):
     (home / "old-svrngs").write_text(old)
     got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654")

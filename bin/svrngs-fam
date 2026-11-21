@@ -628,7 +628,9 @@ def lends_of(at, secret, namespace):
     }
 
 
-NEWER = "Lending from here needs svrngs 1.13.1 or later. Update svrngs on its home page, then try again."
+# What an svrngs older than the panel needs is told: 1.13.3 carries the
+# update floor and Play at a lend's address (svrngs play.rs, at 2fe16c08).
+NEWER = "This needs svrngs 1.13.3 or later. Update svrngs on its home page, then try again."
 
 
 def older_svrngs(pid):
