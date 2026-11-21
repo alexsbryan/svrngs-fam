@@ -35,6 +35,7 @@ promise, for the one fact no route gives: which port each lend serves.
 
 import hashlib
 import http.client
+import ipaddress
 import json
 import os
 import pwd
@@ -136,12 +137,75 @@ def ask(at, secret, method, path, body=None, timeout=TIMEOUT):
     return answer
 
 
-def request(at, secret, method, path, body=None, timeout=TIMEOUT):
-    """One request to svrngs's API: its status, and its JSON, or None when
-    it answered something else. No Origin is sent: svrngs refuses a request
-    that carries one, as coming from a page (api.rs:199-210)."""
+def proc_address(field):
+    """An address and port as /proc/net/tcp and tcp6 give them (proc(5)):
+    the address in hex, each 32-bit word in this computer's byte order; an
+    IPv4 address mapped into IPv6 read as the IPv4 address it is."""
+    host, _, port = field.partition(":")
+    raw = bytes.fromhex(host)
+    if sys.byteorder == "little":
+        raw = b"".join(raw[i:i + 4][::-1] for i in range(0, len(raw), 4))
+    ip = ipaddress.ip_address(raw)
+    return (ip.ipv4_mapped or ip) if ip.version == 6 else ip, int(port, 16)
+
+
+def taken_by(sock):
+    """The account whose socket took `sock`'s connection: the uid of its
+    other end, the row of /proc/net/tcp or tcp6 whose own address is where
+    `sock` connected and whose far one is `sock`'s, an accepted connection's
+    uid being its listener's. None when no such row can be read: Linux lists
+    the connection as its handshake ends, so it is looked for a few times."""
+    near, far = sock.getsockname()[:2], sock.getpeername()[:2]
+    want = ((ipaddress.ip_address(far[0]), far[1]), (ipaddress.ip_address(near[0]), near[1]))
+    for _ in range(5):
+        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                lines = Path(table).read_text().splitlines()[1:]
+            except OSError:
+                continue
+            for line in lines:
+                f = line.split()
+                if len(f) > 7 and f[7].isdigit() and (proc_address(f[1]), proc_address(f[2])) == want:
+                    return int(f[7])
+        time.sleep(0.02)
+    return None
+
+
+def dial(at, timeout=TIMEOUT):
+    """A connection to svrngs's address, sent nothing yet: only once the
+    program that took it is shown to run as this account. svrngs's port is
+    free while svrngs is stopped, and any account on this computer can
+    listen there then; what is sent on it carries svrngs's token, which acts
+    as this person everywhere. Refused as Unreadable, sending nothing, when
+    another account's program took it or whose it is can't be read. Linux
+    lets no other account take the connection over once it is checked."""
     host, port = at
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        conn.connect()
+    except ConnectionRefusedError:
+        raise Stopped() from None
+    except OSError as e:
+        raise Unreadable(f"svrngs's address did not answer: {e}") from None
+    try:
+        owner = taken_by(conn.sock)
+    except (OSError, ValueError):
+        owner = None
+    if owner == os.getuid():
+        return conn
+    conn.close()
+    if owner is None:
+        raise Unreadable(f"the panel couldn't tell whose program answers at svrngs's address, port {port}, so it sent it nothing")
+    raise Unreadable(f"a program of the account {account_name(owner)} answers at svrngs's address, port {port}, so the panel "
+                     f"sent it nothing. svrngs can't start there until that program stops")
+
+
+def request(at, secret, method, path, body=None, timeout=TIMEOUT):
+    """One request to svrngs's API: its status, and its JSON, or None when
+    it answered something else. Sent only on a connection `dial` checked.
+    No Origin is sent: svrngs refuses a request that carries one, as coming
+    from a page (api.rs:199-210)."""
+    conn = dial(at, timeout)
     headers = {"Authorization": f"Bearer {secret}"}
     payload = None
     if body is not None:
@@ -151,8 +215,6 @@ def request(at, secret, method, path, body=None, timeout=TIMEOUT):
         conn.request(method, path, body=payload, headers=headers)
         reply = conn.getresponse()
         raw = reply.read(MAX_BODY + 1)
-    except ConnectionRefusedError:
-        raise Stopped() from None
     except (OSError, http.client.HTTPException) as e:
         raise Unreadable(f"{path} did not answer: {e}") from None
     finally:
@@ -689,7 +751,10 @@ def models(skip=frozenset()):
                 }
 
     def probe(label):
-        conn = http.client.HTTPConnection(at[0], at[1], timeout=4)
+        try:
+            conn = dial(at, timeout=4)
+        except (Stopped, Unreadable):
+            return None
         try:
             conn.request("GET", "/v1/models", headers={"Host": f"{label}.localhost:{at[1]}", "Authorization": f"Bearer {secret}"})
             reply = conn.getresponse()

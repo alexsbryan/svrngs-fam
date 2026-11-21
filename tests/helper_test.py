@@ -267,6 +267,83 @@ got = state(home)
 check("foreign address: unreadable", got["svrngs"], "unreadable")
 check("foreign address: never asked", "192.168" in got.get("reason", ""), True)
 
+# Another account's program on svrngs's port, while svrngs is down: a uid
+# of this account's own subordinate range (/etc/subuid), which is no
+# account here, as `unshare --map-auto` gives it without root. It answers
+# as svrngs would and writes down every byte it is sent.
+FOREIGN = r"""
+import socket, sys
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1])))
+s.listen()
+print("ready", flush=True)
+body = b'{"groups": [], "open": "http://evil.localhost:1/", "lent": []}'
+while True:
+    c, _ = s.accept()
+    c.settimeout(2)
+    try:
+        got = c.recv(65536)
+        print(repr(got), flush=True)
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+    except OSError:
+        pass
+    c.close()
+"""
+
+
+def foreign(port):
+    """Another account's program listening on 127.0.0.1:`port`, or None
+    when this computer can't make one."""
+    argv = ["unshare", "--map-auto", "--map-root-user", "setpriv", "--reuid=1", "--regid=1", "--clear-groups",
+            "python3", "-I", "-c", FOREIGN, str(port)]
+    try:
+        held = subprocess.Popen(argv, cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return None
+    if held.stdout.readline().strip() != "ready":
+        held.kill()
+        return None
+    return held
+
+
+def owner_of_listener(port):
+    """The uid /proc/net/tcp gives the listener on 127.0.0.1:`port`."""
+    want = f"0100007F:{port:04X}"
+    for line in Path("/proc/net/tcp").read_text().splitlines()[1:]:
+        f = line.split()
+        if f[1] == want and f[3] == "0A":
+            return int(f[7])
+    return None
+
+
+home = case("another account's program on svrngs's port is sent nothing")
+squat_port = closed_port()
+data_dir(home, port=squat_port)
+(home / ".svrngs/lends/garden.json").write_text(json.dumps({"port": closed_port(), "kind": "python3", "groups": ["a" * 64]}))
+squat = foreign(squat_port)
+check("another account's listener could be planted", squat is not None and owner_of_listener(squat_port) not in (None, os.getuid()), True)
+try:
+    got = state(home, "--full")
+    asked = {verb: run(home, *args)[0] for verb, args in (
+        ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
+        ("open", ("open",)), ("models", ("models",)))}
+finally:
+    if squat:
+        squat.kill()
+received = squat.communicate()[0] if squat else ""
+check("its read is unreadable, never running", got["svrngs"], "unreadable")
+check("and says another account's program answers there, and that it was sent nothing",
+      ("account" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")), (True, True))
+check("approve, open and models each refuse, saying so",
+      {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
+      {verb: (False, True) for verb in asked})
+# Each connection it took is read, so whose it is can be told, then
+# closed: it receives `b''` for each, and never a byte.
+check("it was sent no byte on any connection, and never the token",
+      ([r for r in received.splitlines() if r != "b''"], TOKEN in received), ([], False))
+check("nothing was opened in the browser", (home / "browser-argv").exists(), False)
+
 home = case("what runs here, and what is offered")
 fake = Fake()
 data_dir(home, port=fake.port)

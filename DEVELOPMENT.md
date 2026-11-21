@@ -20,7 +20,9 @@ only part that reads svrngs's key. The words are in `i18n/en.json`.
 `tests/run` runs everything in about a minute: the helper against a
 stand-in svrngs, Get svrngs against a stand-in release, and the panel
 itself offscreen, which needs Omarchy's shell. No test reaches the svrngs on your
-computer.
+computer. The helper's test plays another account on this computer with
+`unshare --map-auto`, which needs your account to have a range in
+`/etc/subuid`, as rootless Podman does; without one, that check fails.
 
 ## Packages
 
