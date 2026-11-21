@@ -233,9 +233,11 @@ Panel {
     if (Model.keepable(l)) fam.act("keep:" + l.name, Model.approveArgs(l))
   }
 
-  // A lend of yours, in a word: why svrngs holds it closed, for any reason,
-  // before whether it runs or where it goes.
+  // A lend of yours, in a word: that svrngs doesn't list it, so lends it to
+  // nobody; why svrngs holds it closed, for any reason; then whether it
+  // runs or where it goes.
   function lentNote(l) {
+    if (l.unlisted) return strings.t("here.unlisted")
     if (l.held !== "") return strings.t(Model.heldKey(l.held))
     if (!l.answering) return strings.t("here.notRunning")
     return l.groups.length > 0 ? strings.t("here.lentTo").arg(l.groups.join(", ")) : strings.t("here.lentNowhere")

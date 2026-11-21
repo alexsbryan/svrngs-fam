@@ -80,20 +80,32 @@ function lent(answer) {
   // held: approving sends back what that row showed.
   var answering = {}
   var held = {}
+  // Which groups' lends were read, and which of this computer's lends
+  // svrngs listed in them: svrngs leaves out a lend it can't read (svrngs
+  // door.rs `offered`), and a lend it doesn't list is lent to nobody.
+  var read = {}
+  var listed = {}
   groups(answer).forEach(function(g) {
     var lends = answer.lends ? answer.lends[g.id] : null
+    if (lends && lends.lent && !lends.error) read[g.id] = true
     ;((lends && lends.lent) || []).forEach(function(l) {
       if (!own(answer, l)) return
+      listed[l.name] = true
       if (l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
       if (l.held && !held[l.name]) held[l.name] = l
     })
   })
   return (answer.mine || []).map(function(m) {
     var row = held[m.name] || {}
+    // Not listed where it is lent, in a group svrngs's lends were read
+    // for, or its file couldn't be read here: never said lent. Lent only
+    // to groups not read, it isn't judged, and its file is believed.
+    var asked = (m.groups || []).filter(function(id) { return read[id] === true })
     return {
       name: m.name,
       port: m.port,
       groups: (m.groups || []).map(function(id) { return names[id] || "" }).filter(function(n) { return n !== "" }),
+      unlisted: m.readable === false || asked.length > 0 && listed[m.name] !== true,
       answering: answering[m.name] === false ? false : true,
       held: row.held || "",
       token: typeof row.token === "string" ? row.token : "",

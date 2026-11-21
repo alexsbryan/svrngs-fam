@@ -937,7 +937,12 @@ PAGE_AT = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?(/[^\s#'\"]*)?")
 KEYS = Path(__file__).resolve().parent.parent / "keys"
 MAX_TEXT_FILE = 1024 * 1024
 MAX_ARCHIVE = 64 * 1024 * 1024
-LINK = re.compile(r"(svrngs:[A-Za-z0-9_-]{8,512}|https://[A-Za-z0-9.-]+/[^\s'\"]{0,1024})")
+# An invite link Get svrngs takes: the https one, whose token is after `#`.
+# svrngs's own link, svrngs://join/<token>, is for a computer that has
+# svrngs (svrngs-core link.rs `CLIENT_PREFIX`); its installer refuses it
+# (web/install.sh:100-102), so it is refused before anything is fetched.
+LINK = re.compile(r"https://[A-Za-z0-9.-]+/[^\s'\"]{0,1024}")
+CLIENT_LINK = "That link is for a computer that has svrngs already. Empty the box and press Get svrngs, then paste the link under Join a group on your home page."
 ARCHES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
 
 
@@ -1010,6 +1015,8 @@ def get_svrngs(link):
     link's (install.sh `from`), so the invite never says what svrngs
     becomes either. What it kept is read back after, and said if it
     isn't that page."""
+    if link is not None and link.lower().startswith("svrngs:"):
+        return {"ok": False, "said": CLIENT_LINK}
     if link is not None and not LINK.fullmatch(link):
         return {"ok": False, "said": "That doesn't look like a svrngs invite link. Paste the whole link your friend sent."}
     page = update_page()

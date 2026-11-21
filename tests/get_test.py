@@ -31,9 +31,13 @@ def check(name, got, want):
         failures.append(name)
 
 
+# Every path the stand-in releases were asked for.
+fetched = []
+
+
 class Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *args):
-        pass
+        fetched.append(self.path)
 
 
 with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
@@ -156,6 +160,15 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     check("a release with no signed installer says so", (said["ok"], ran, "no signed installer" in said["said"]), (False, None, True))
     said, ran, given = get("good", "--link", "'; rm -rf ~; '")
     check("something that isn't an invite link is refused", (said["ok"], ran), (False, None))
+    # svrngs's own links, for a computer that has svrngs, which its
+    # installer refuses (web/install.sh:100-102): refused here first.
+    for link in ("svrngs://join/AbCdEf0123456789", "svrngs:AbCdEf0123456789"):
+        before = len(fetched)
+        said, ran, given = get("good", "--link", link)
+        check(f"{link.split('A')[0]}… is refused before anything is fetched or run", (said["ok"], ran, len(fetched) - before), (False, None, 0))
+        check("saying what to do instead", said["said"],
+              "That link is for a computer that has svrngs already. Empty the box and press Get svrngs, "
+              "then paste the link under Join a group on your home page.")
     server.shutdown()
 
 print("ALL OK" if not failures else f"{len(failures)} FAILED")

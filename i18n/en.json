@@ -40,6 +40,7 @@
   "groups.notRunning": "Not running now",
   "groups.unanswered": "%1's computer isn't answering",
   "here.notRunning": "Not running now: start it, and your people can open it",
+  "here.unlisted": "Not shared: svrngs can't read this lend. Stop it, then lend it again.",
   "here.heldAnother": "Closed: what answers on its port isn't what you chose to share",
   "here.heldUnjudged": "Closed: svrngs can't tell what is answering on its port",
   "here.heldUnapproved": "Closed until you choose what it shares",

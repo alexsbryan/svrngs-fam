@@ -162,7 +162,7 @@ ShellRoot {
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))
       check("what is offered, with the process shown", JSON.stringify(barPanel.offers), JSON.stringify([{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77, through: false }]))
       check("what is lent, its groups' names, and that its program is down", JSON.stringify(barPanel.lent),
-            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], answering: false, held: "", token: "", unread: "", now: null }]))
+            JSON.stringify([{ name: "notes", port: 3001, groups: ["WorkingGroup"], unlisted: false, answering: false, held: "", token: "", unread: "", now: null }]))
       var friends = Model.friendsLends(fam.answer, barPanel.groups[0])
       check("a group's lends from others, not yours, each running or not", JSON.stringify(friends.map(function(l) { return l.person + ":" + l.label + ":" + l.answering })),
             JSON.stringify(["Fedora:abc123:true", "Fedora:fff999:false"]))
@@ -243,6 +243,23 @@ ShellRoot {
       delete keyless.key
       show(keyless)
       check("with no key from svrngs, no row is yours", JSON.stringify(barPanel.lent.map(function(l) { return l.answering })), JSON.stringify([true]))
+
+      console.log("a lend svrngs doesn't list is never said lent")
+      // ghost: its file says WorkingGroup, whose lends svrngs listed without
+      // it, as it leaves out a declaration it can't read (door.rs
+      // `offered`); broken: a file the helper couldn't read; family: lent
+      // to a group whose lends weren't read, so not judged.
+      var unlisted = JSON.parse(JSON.stringify(running))
+      unlisted.mine = running.mine.concat([{ name: "ghost", port: 3010, groups: ["g1"] }, { name: "broken", port: null, readable: false },
+                                           { name: "family", port: 3011, groups: ["g2"] }])
+      show(unlisted)
+      check("its line says svrngs doesn't share it, and how to fix it; one not judged says where it is lent",
+            JSON.stringify(barPanel.lent.map(function(l) { return barPanel.lentNote(l) })), JSON.stringify([
+              "Not running now: start it, and your people can open it",
+              "Not shared: svrngs can't read this lend. Stop it, then lend it again.",
+              "Not shared: svrngs can't read this lend. Stop it, then lend it again.",
+              "Lent to <b>Family</b>"]))
+      check("and it still has Stop", barPanel.stops.indexOf("stop:ghost") >= 0 && barPanel.stops.indexOf("stop:broken") >= 0, true)
 
       console.log("an offer's name is one no other port's lend has")
       var named = JSON.parse(JSON.stringify(running))
@@ -529,9 +546,9 @@ ShellRoot {
       barPanel.activate("get")
       check("the first press asks first", barPanel.getting, true)
       check("and runs nothing", fam.doing, "")
-      barPanel.getLink = "  svrngs:AbCdEf0123456789 "
+      barPanel.getLink = "  https://group.svrnme.sh/#AbCdEf0123456789 "
       barPanel.getSvrngs()
-      check("the second press runs the helper's get, with the link", JSON.stringify(fam.lastAsked), JSON.stringify(["get", "--link", "svrngs:AbCdEf0123456789"]))
+      check("the second press runs the helper's get, with the link", JSON.stringify(fam.lastAsked), JSON.stringify(["get", "--link", "https://group.svrnme.sh/#AbCdEf0123456789"]))
       settle.then = harness.afterGet
       settle.start()
     }
