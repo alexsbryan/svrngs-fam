@@ -194,6 +194,9 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     check("a release with no signed installer says so", (said["ok"], ran, "no signed installer" in said["said"]), (False, None, True))
     said, ran, given = get("good", "--link", "'; rm -rf ~; '")
     check("something that isn't an invite link is refused", (said["ok"], ran), (False, None))
+    said, ran, given = get("good", "--link")
+    check("--link with no link after it is refused, never installed as if none was given",
+          (said["ok"], said["said"], ran), (False, "--link wants a value after it, and none was given", None))
     # svrngs's own links, for a computer that has svrngs, which its
     # installer refuses (web/install.sh:100-102): refused here first.
     for link in ("svrngs://join/AbCdEf0123456789", "svrngs:AbCdEf0123456789"):

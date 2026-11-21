@@ -869,6 +869,26 @@ check("stopped", (got["ok"], (home / "svrngs-argv").read_text().split()), (True,
 got, _ = run(home, "start")
 check("start asks svrngs to restart itself", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["restart"]))
 
+
+def answered(home, *args):
+    """The helper's answer, or None when what it printed is no JSON object."""
+    try:
+        got = run(home, *args)[0]
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
+home = case("a flag given last, with nothing after it, is refused in one answer, nothing run")
+data_dir(home)
+for args in (("unshare", "garden", "--group"), ("open", "--lend"), ("open", "--at"), ("models", "--skip"),
+             ("share", "3000", "a" * 64, "garden", "--program"), ("share", "3000", "a" * 64, "garden", "--pid"),
+             ("approve", "garden", "--token")):
+    (home / "svrngs-calls").unlink(missing_ok=True)
+    got = answered(home, *args)
+    check(f"{' '.join(args)[:40]}: said as a refusal, svrngs not run", (got, (home / "svrngs-calls").exists()),
+          ({"ok": False, "said": f"{args[-1]} wants a value after it, and none was given"}, False))
+
 home = case("keep sharing a held lend: what its row showed, by its token and its process")
 fake = Fake()
 data_dir(home, port=fake.port)

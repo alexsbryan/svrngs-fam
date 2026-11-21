@@ -1369,17 +1369,40 @@ def sums_of(listing):
     return found
 
 
+class Unasked(Exception):
+    """A flag given last, with no value after it."""
+
+
+def value(rest, flag):
+    """What follows `flag` in `rest`; None when `flag` isn't there. A flag
+    given last is refused (Unasked), never taken as not given."""
+    if flag not in rest:
+        return None
+    at = rest.index(flag) + 1
+    if at >= len(rest):
+        raise Unasked(f"{flag} wants a value after it, and none was given")
+    return rest[at]
+
+
 def process_of(rest):
     """(`--pid`'s value, None), or (None, a refusal) when it isn't a process
     and its start as the panel reads them, so svrngs is never run with it."""
-    at = rest.index("--pid") + 1
-    pid = rest[at] if at < len(rest) else ""
+    pid = value(rest, "--pid")
     if not re.fullmatch(r"[0-9]{1,7}@[0-9]{1,20}", pid):
         return None, {"ok": False, "said": f"not a process and its start: {text(pid)}"}
     return pid, None
 
 
 def main(argv):
+    """The helper's one JSON answer to `argv`: a flag with no value after it
+    is refused, as any argument it can't take is."""
+    try:
+        return answer(argv)
+    except Unasked as e:
+        return {"ok": False, "said": str(e)}
+
+
+def answer(argv):
     if not argv:
         return {"ok": False, "said": __doc__.strip().splitlines()[0]}
     verb, rest = argv[0], argv[1:]
@@ -1388,8 +1411,7 @@ def main(argv):
     if verb == "share" and len(rest) >= 3 and rest[0].isdigit():
         port, group, name = rest[:3]
         args = ["share", port, "--group", group, "--name", name]
-        at = rest.index("--program") + 1 if "--program" in rest else len(rest)
-        program = rest[at] if at < len(rest) else None
+        program = value(rest, "--program")
         # The process the panel showed, by its pid and start: svrngs lends
         # the port only if that process holds every socket on it, and
         # refuses, saying so, when the pid now names another process.
@@ -1406,8 +1428,8 @@ def main(argv):
     if verb == "approve" and rest:
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", rest[0]):
             return {"ok": False, "said": f"not a share's name: {text(rest[0])}"}
-        at = rest.index("--token") + 1 if "--token" in rest else len(rest)
-        if at >= len(rest) or not LISTED_WITH.fullmatch(rest[at]):
+        shown = value(rest, "--token")
+        if shown is None or not LISTED_WITH.fullmatch(shown):
             return {"ok": False, "said": "approve wants the token its row was listed with: --token <token>"}
         # Only ever to a process of this account's, by its pid and start:
         # never the token alone, which svrngs would take for another
@@ -1417,11 +1439,12 @@ def main(argv):
         pid, refused = process_of(rest)
         if refused:
             return refused
-        return keep_sharing(rest[0], rest[at], pid)
+        return keep_sharing(rest[0], shown, pid)
     if verb == "unshare" and rest:
         args = ["unshare", rest[0]]
-        if "--group" in rest:
-            args += ["--group", rest[rest.index("--group") + 1]]
+        group = value(rest, "--group")
+        if group is not None:
+            args += ["--group", group]
         return run_svrngs(args)
     if verb == "play" and len(rest) >= 2:
         key, name = rest[:2]
@@ -1429,13 +1452,13 @@ def main(argv):
             return {"ok": False, "said": f"not a lend's computer and name: {text(key)} {text(name)}"}
         return play(key, name, off="--off" in rest[2:])
     if verb == "models":
-        skip = rest[rest.index("--skip") + 1].split(",") if "--skip" in rest and rest.index("--skip") + 1 < len(rest) else []
-        return models(set(skip))
+        skip = value(rest, "--skip")
+        return models(set(skip.split(",")) if skip is not None else set())
     if verb == "open":
         body = {}
         for flag, key in (("--lend", "lend"), ("--at", "at")):
-            if flag in rest:
-                body[key] = rest[rest.index(flag) + 1]
+            if value(rest, flag) is not None:
+                body[key] = value(rest, flag)
         return open_in_browser(body)
     if verb == "link" and rest:
         return invite(rest[0])
@@ -1444,7 +1467,7 @@ def main(argv):
     if verb == "start":
         return run_svrngs(["restart"])
     if verb == "get":
-        link = rest[rest.index("--link") + 1] if "--link" in rest and rest.index("--link") + 1 < len(rest) else None
+        link = value(rest, "--link")
         return get_svrngs(link.strip() if link else None)
     return {"ok": False, "said": f"unknown verb or arguments: {text(' '.join(argv))}"}
 
