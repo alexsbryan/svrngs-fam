@@ -401,29 +401,38 @@ fake.close()
 home = case("models: friends' lends that answer as one")
 fake = Fake()
 data_dir(home, port=fake.port)
+# Each row with the key of the computer that lends it, as svrngs lists it
+# (node.rs `Lending`): this computer's is GROUPS's "c"*64.
 fake.lends = {"lent": [
-    {"person": "Fedora", "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
-    {"person": "Fedora", "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
-    {"person": "LittleMac", "name": "mine", "kind": "llama-server", "origin": f"http://mine1.localhost:{fake.port}/"},
-    {"person": "Mallory", "name": "elsewhere", "kind": "spot", "origin": "http://model2.localhost:1/"},
-    {"person": "Fedora", "name": "asleep", "kind": "spot", "origin": f"http://model3.localhost:{fake.port}/", "answering": False},
-    {"person": "Fedora", "name": "taken", "kind": "spot", "origin": f"http://model4.localhost:{fake.port}/", "answering": True, "held": "another"},
-    {"person": "Fedora", "name": "newer", "kind": "spot", "origin": f"http://model5.localhost:{fake.port}/", "answering": True, "held": "paused"},
+    {"person": "Fedora", "key": "d" * 64, "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
+    {"person": "Fedora", "key": "d" * 64, "name": "garden", "kind": "puma", "origin": f"http://garden1.localhost:{fake.port}/"},
+    {"person": "LittleMac", "key": "c" * 64, "name": "mine", "kind": "llama-server", "origin": f"http://mine1.localhost:{fake.port}/"},
+    {"person": "LittleMac", "key": "e" * 64, "name": "namesake", "kind": "llama-server", "origin": f"http://model6.localhost:{fake.port}/"},
+    {"person": "Mallory", "key": "f" * 64, "name": "elsewhere", "kind": "spot", "origin": "http://model2.localhost:1/"},
+    {"person": "Fedora", "key": "d" * 64, "name": "asleep", "kind": "spot", "origin": f"http://model3.localhost:{fake.port}/", "answering": False},
+    {"person": "Fedora", "key": "d" * 64, "name": "taken", "kind": "spot", "origin": f"http://model4.localhost:{fake.port}/", "answering": True, "held": "another"},
+    {"person": "Fedora", "key": "d" * 64, "name": "newer", "kind": "spot", "origin": f"http://model5.localhost:{fake.port}/", "answering": True, "held": "paused"},
 ]}
-fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"], "model3": ["y"], "model4": ["z"], "model5": ["w"]}
+fake.models = {"model1": ["qwen3-coder"], "mine1": ["mine"], "model2": ["x"], "model3": ["y"], "model4": ["z"], "model5": ["w"], "model6": ["v"]}
 got, _ = run(home, "models")
-check("one model found", [(m["person"], m["name"], m["models"]) for m in got["models"]], [("Fedora", "coder", ["qwen3-coder"])])
-check("of two friends' lends asked at svrngs's own address", got["asked"], 2)
+check("two models found, one by a member who took your name", [(m["person"], m["name"], m["models"]) for m in got["models"]],
+      [("Fedora", "coder", ["qwen3-coder"]), ("LittleMac", "namesake", ["v"])])
+check("of three friends' lends asked at svrngs's own address", got["asked"], 3)
 check("its address is the lend's, ending in v1", got["models"][0]["address"] if got["models"] else None, f"http://model1.localhost:{fake.port}/v1")
 asked = [s["headers"].get("Host", "").split(".")[0] for s in fake.seen if s["path"] == "/v1/models"]
-check("your own lend is not asked", "mine1" in asked, False)
+check("your own lend, by this computer's key, is not asked", "mine1" in asked, False)
 check("a lend not at svrngs's own address is never sent the token", "model2" in asked, False)
 check("a lend its lender says is not running is not asked", "model3" in asked, False)
 check("nor one svrngs holds closed", "model4" in asked, False)
 check("nor one held for a reason this helper doesn't know", "model5" in asked, False)
-full = state(home, "--full")["lends"]["a" * 64]["lent"]
-check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, False, True, True])
-check("and whether svrngs holds it closed", [l["held"] for l in full], [None, None, None, None, None, "another", "unknown"])
+whole = state(home, "--full")
+full = whole["lends"]["a" * 64]["lent"]
+check("whether each is running, as its lender says, or not said", [l["answering"] for l in full], [None, None, None, None, None, False, True, True])
+check("and whether svrngs holds it closed", [l["held"] for l in full], [None, None, None, None, None, None, "another", "unknown"])
+check("this computer's key, and each row's lender's, pass through", (whole.get("key"), [l.get("key") for l in full][:4]),
+      ("c" * 64, ["d" * 64, "d" * 64, "c" * 64, "e" * 64]))
+fake.lends = {"lent": [{**fake.lends["lent"][0], "key": "not a key"}, {**fake.lends["lent"][0], "key": None}]}
+check("a key that is none passes as none", [l["key"] for l in state(home, "--full")["lends"]["a" * 64]["lent"]], [None, None])
 fake.close()
 
 home = case("a held lend of this computer's: why, what svrngs read on its port, and its token")
@@ -444,7 +453,7 @@ browser, browser_start = serve(browser_port, home, comm="chromium")
 # answers, `unread` with its reason (uid.rs `Unread`) and no `answers`.
 # Another person's lend says none of these (door.rs `lends`).
 LISTED = "0f" * 32
-own = lambda name, **row: {"person": "LittleMac", "name": name, "kind": "python3", "origin": f"http://{name}1.localhost:{fake.port}/", **row}
+own = lambda name, **row: {"person": "LittleMac", "key": "c" * 64, "name": name, "kind": "python3", "origin": f"http://{name}1.localhost:{fake.port}/", **row}
 program = lambda server, start, folder: {"pid": server.pid, "start": start, "program": "python3", "folder": folder}
 garden_said = program(garden, garden_start, "~/work/garden-app")
 fake.lends = {"lent": [
@@ -467,7 +476,10 @@ fake.lends = {"lent": [
     own("accounts", held="another", answering=True, answers=[{"account": "0"}, {"account": UNNAMED}], token=LISTED),
     own("paused", held="paused"), own("shaped", held={"why": "a newer svrngs's"}), own("listed", held=["another"]),
     own("open", answering=True), own("nulled", held=None), own("blank", held=""),
-    {"person": "Fedora", "name": "theirs-open", "kind": "spot", "origin": f"http://f1.localhost:{fake.port}/", "answering": True},
+    {"person": "Fedora", "key": "d" * 64, "name": "theirs-open", "kind": "spot", "origin": f"http://f1.localhost:{fake.port}/", "answering": True},
+    # A member who took this computer's person's name, listing a held lend
+    # with what answers, as a friend's row may say anything.
+    {**own("namesake", held="another", answering=True, answers=[garden_said], token=LISTED), "key": "e" * 64},
 ]}
 try:
     full, quick = state(home, "--full"), state(home, "--here")
@@ -478,7 +490,7 @@ rows_said = full["lends"]["a" * 64]["lent"]
 check("svrngs's reasons pass through, unapproved its own; one this helper doesn't know is held all the same",
       [l["held"] for l in rows_said],
       ["unapproved", "another", "unjudged", "another", "another", "another", "unjudged", "another", "another", "another", "another",
-       "another", "another", "another", "another", "another", "another", "unknown", "unknown", "unknown", None, None, None, None])
+       "another", "another", "another", "another", "another", "another", "unknown", "unknown", "unknown", None, None, None, None, "another"])
 check("each held one's token passes through; one that is no token is none",
       [l["token"] for l in rows_said][:10], [LISTED, None, LISTED, LISTED, LISTED, None, None, LISTED, LISTED, None])
 check("what svrngs read on its port passes through", rows_said[0]["answers"], [garden_said])
@@ -514,6 +526,8 @@ check("a process gone since svrngs read it: said in svrngs's words, its pid and 
                     "said": "python3 in ~/garden-app"})
 check("a row with no answers, from an svrngs before 1.13.0, or not held, or not this computer's: no line",
       [now[n] for n in ("older", "paused", "open", "theirs-open")], ["unsaid"] * 4)
+check("another computer's row, its person named as yours, gets no line of what answers here, whatever it lists",
+      now["namesake"], "unsaid")
 quick_now = {m["name"]: m.get("now") for m in quick["mine"]}
 check("the quick read asks no group, and keeps this computer's own read of each lend's port",
       ("lends" in quick, (quick_now["garden"] or {}).get("pid"), quick_now["quiet"]), (False, garden.pid, None))

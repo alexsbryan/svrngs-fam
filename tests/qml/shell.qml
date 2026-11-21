@@ -35,11 +35,12 @@ ShellRoot {
         { id: "g2", name: "<b>Family</b>", person: "Alex", left: false },
         { id: "g3", name: "Old", person: "LittleMac", left: true }
       ],
+      key: "kme",
       mine: [{ name: "notes", port: 3001, groups: ["g1"] }],
       lends: { g1: { lent: [
-        { person: "Fedora", name: "deepseek-flash", kind: "spot", origin: "http://abc123.localhost:41097/" },
-        { person: "Fedora", name: "garden", kind: "puma", origin: "http://fff999.localhost:41097/", answering: false },
-        { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
+        { person: "Fedora", key: "kfedora", name: "deepseek-flash", kind: "spot", origin: "http://abc123.localhost:41097/" },
+        { person: "Fedora", key: "kfedora", name: "garden", kind: "puma", origin: "http://fff999.localhost:41097/", answering: false },
+        { person: "LittleMac", key: "kme", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
       ], unanswered: ["Bo"] } },
       listeners: [{ port: 3000, program: "puma", name: "garden", pid: 1, start: 77 }]
     })
@@ -53,6 +54,7 @@ ShellRoot {
     readonly property var kept: ({
       svrngs: "running",
       groups: running.groups,
+      key: "kme",
       mine: [
         { name: "garden", port: 3000, groups: ["g1"] },
         { name: "quiet", port: 3002, groups: ["g1"] },
@@ -66,23 +68,23 @@ ShellRoot {
         { name: "notes", port: 3001, groups: ["g1"] }
       ],
       lends: { g1: { lent: [
-        { person: "LittleMac", name: "garden", kind: "puma", origin: "http://k1.localhost:41097/", held: "unapproved", token: "t1",
+        { person: "LittleMac", key: "kme", name: "garden", kind: "puma", origin: "http://k1.localhost:41097/", held: "unapproved", token: "t1",
           now: { pid: 10, start: 20, program: "puma", folder: "~/my-garden", said: "puma in ~/my-garden" } },
-        { person: "LittleMac", name: "quiet", kind: "puma", origin: "http://k2.localhost:41097/", held: "another", token: null, now: null },
-        { person: "LittleMac", name: "theirs", kind: "puma", origin: "http://k3.localhost:41097/", held: "unjudged", token: "t3",
+        { person: "LittleMac", key: "kme", name: "quiet", kind: "puma", origin: "http://k2.localhost:41097/", held: "another", token: null, now: null },
+        { person: "LittleMac", key: "kme", name: "theirs", kind: "puma", origin: "http://k3.localhost:41097/", held: "unjudged", token: "t3",
           now: { pid: null, start: null, program: "", folder: "" } },
-        { person: "LittleMac", name: "odd", kind: "python3", origin: "http://k4.localhost:41097/", held: "unknown", token: "t4",
+        { person: "LittleMac", key: "kme", name: "odd", kind: "python3", origin: "http://k4.localhost:41097/", held: "unknown", token: "t4",
           now: { pid: 11, start: 21, program: "python3", folder: "~/work/odd", said: "python3 in ~/work/odd" } },
-        { person: "LittleMac", name: "shaped", kind: "python3", origin: "http://k6.localhost:41097/", held: "paused", token: "t6",
+        { person: "LittleMac", key: "kme", name: "shaped", kind: "python3", origin: "http://k6.localhost:41097/", held: "paused", token: "t6",
           now: { pid: 13, start: 23, program: "python3", folder: "~/tmp/odd", said: "python3 in ~/tmp/odd" } },
-        { person: "LittleMac", name: "unread", kind: "python3", origin: "http://k5.localhost:41097/", held: "unapproved" },
-        { person: "LittleMac", name: "untold", kind: "python3", origin: "http://k7.localhost:41097/", held: "another", token: null,
+        { person: "LittleMac", key: "kme", name: "unread", kind: "python3", origin: "http://k5.localhost:41097/", held: "unapproved" },
+        { person: "LittleMac", key: "kme", name: "untold", kind: "python3", origin: "http://k7.localhost:41097/", held: "another", token: null,
           now: { pid: 14, start: 24, program: "python3", folder: "", said: "python3" } },
-        { person: "LittleMac", name: "account", kind: "python3", origin: "http://k8.localhost:41097/", held: "another", token: "t8",
+        { person: "LittleMac", key: "kme", name: "account", kind: "python3", origin: "http://k8.localhost:41097/", held: "another", token: "t8",
           now: { pid: null, start: null, program: "", folder: "", account: "root", said: "a program of the account root and a program of the account bob" } },
-        { person: "LittleMac", name: "lost", kind: "python3", origin: "http://k9.localhost:41097/", held: "another", token: null,
+        { person: "LittleMac", key: "kme", name: "lost", kind: "python3", origin: "http://k9.localhost:41097/", held: "another", token: null,
           unread: "failed" },
-        { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
+        { person: "LittleMac", key: "kme", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: false }
       ], unanswered: [] } },
       listeners: []
     })
@@ -167,7 +169,7 @@ ShellRoot {
       check("whose computer did not answer is named", JSON.stringify(Model.unanswered(fam.answer, barPanel.groups[0])), JSON.stringify(["Bo"]))
       var held = JSON.parse(JSON.stringify(running))
       held.lends.g1.lent[0].held = "unjudged"
-      held.lends.g1.lent[2] = { person: "LittleMac", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: true, held: "another" }
+      held.lends.g1.lent[2] = { person: "LittleMac", key: "kme", name: "notes", kind: "python3", origin: "http://def456.localhost:41097/", answering: true, held: "another" }
       show(held)
       check("a friend's lend svrngs holds closed can't be opened, though its port answers",
             JSON.stringify(Model.friendsLends(fam.answer, barPanel.groups[0]).map(function(l) { return l.label + ":" + l.answering })),
@@ -222,6 +224,25 @@ ShellRoot {
       show(twice)
       check("lent to two groups: the reason, token and process all come from one row",
             JSON.stringify(Model.approveArgs(barPanel.lent[0])), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
+
+      console.log("your rows are told by this computer's key, never by your name")
+      // A member who took this computer's person's name lists a lend of
+      // the same name, held, with what answers, a token and running.
+      var namesake = JSON.parse(JSON.stringify(running))
+      namesake.lends.g1.lent.push({ person: "LittleMac", key: "kother", name: "notes", kind: "python3", origin: "http://n1.localhost:41097/",
+        answering: true, held: "another", token: "tn", now: { pid: 40, start: 41, program: "python3", folder: "~/theirs", said: "python3 in ~/theirs" } })
+      show(namesake)
+      check("can't write on your lend's line, nor give it a Keep sharing it",
+            JSON.stringify(barPanel.lent.map(function(l) { return [l.held, l.token, l.answering, Model.keepable(l)].join("|") })), JSON.stringify(["||false|false"]))
+      check("and what they lend is listed as theirs, under the name they took",
+            JSON.stringify(Model.groupView(fam.answer, barPanel.groups[0], "").people.map(function(p) { return p.person + ":" + p.items.map(function(i) { return i.label }).join("+") })),
+            JSON.stringify(["Fedora:abc123+fff999", "LittleMac:n1"]))
+      check("to open, as a friend's", JSON.stringify(Model.friendsLends(fam.answer, barPanel.groups[0]).map(function(l) { return l.label })),
+            JSON.stringify(["abc123", "fff999", "n1"]))
+      var keyless = JSON.parse(JSON.stringify(running))
+      delete keyless.key
+      show(keyless)
+      check("with no key from svrngs, no row is yours", JSON.stringify(barPanel.lent.map(function(l) { return l.answering })), JSON.stringify([true]))
 
       console.log("an offer's name is one no other port's lend has")
       var named = JSON.parse(JSON.stringify(running))

@@ -479,6 +479,9 @@ def state(full):
             if isinstance(g, dict)
         ]
         report["groupsCut"] = over
+        # This computer's key, which tells its own lends from the rest:
+        # each lend's row carries its lender computer's (`lends_of`).
+        report["key"] = key_of(held.get("key"))
         report["svrngs"] = "running"
         if full == "full":
             # Asked together: the panel waits on the slowest group, not the sum.
@@ -486,11 +489,12 @@ def state(full):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 report["lends"] = dict(zip(asked, pool.map(lambda ns: lends_of(at, secret, ns), asked)))
             # A held lend of this computer's, as its line shows it: what
-            # svrngs read answering on its port for that row.
+            # svrngs read answering on its port for that row. Only a row
+            # of this computer's key: a display name is anyone's to take.
             ports = {m["name"]: m["port"] for m in report["mine"]}
             for lends in report["lends"].values():
                 for l in lends.get("lent", []):
-                    if l["answers"] is not None:
+                    if l["answers"] is not None and l["key"] is not None and l["key"] == report["key"]:
                         l["now"] = svrngs_now(l, ports.get(l["name"]))
         if full in ("full", "here"):
             listed = listening()
@@ -520,6 +524,16 @@ HELD = ("another", "unjudged", "unapproved")
 # The token a held lend's row is listed with, which approving what the row
 # showed sends back: opaque, a SHA-256 in hex from svrngs (share.rs `token`).
 LISTED_WITH = re.compile(r"[A-Za-z0-9._~][A-Za-z0-9._~-]{0,255}")
+
+
+# A computer's key as svrngs names it: its ed25519 public key in hex
+# (svrngs-core sig.rs `actor_of`).
+KEY = re.compile(r"[0-9a-f]{64}")
+
+
+def key_of(value):
+    """A computer's key svrngs gave, or None when what it gave is none."""
+    return value if isinstance(value, str) and KEY.fullmatch(value) else None
 
 
 def counted(value):
@@ -583,6 +597,9 @@ def lends_of(at, secret, namespace):
         "lent": [
             {
                 "person": text(l.get("person")),
+                # The computer that lends it, by its key, as svrngs dialled
+                # it (svrngs node.rs `lends_in`), never as its row says.
+                "key": key_of(l.get("key")),
                 "name": text(l.get("name")),
                 "kind": text(l.get("kind")),
                 "origin": text(l.get("origin")),
@@ -769,20 +786,21 @@ def models(skip=frozenset()):
         return refused
     at, secret = held
     try:
-        groups = [g for g in rows(ask(at, secret, "GET", "/v1/groups").get("groups"))[0] if isinstance(g, dict) and not g.get("left")]
+        holding = ask(at, secret, "GET", "/v1/groups")
     except (Stopped, Unreadable) as e:
         return {"ok": False, "said": str(e) or "svrngs isn't running"}
+    groups = [g for g in rows(holding.get("groups"))[0] if isinstance(g, dict) and not g.get("left")]
+    me = key_of(holding.get("key"))
     candidates = {}
     for g in groups:
-        me = g.get("person")
         try:
             lent = rows(ask(at, secret, "GET", f"/v1/lends?namespace={g.get('id')}", timeout=LENDS_TIMEOUT).get("lent"))[0]
         except (Stopped, Unreadable):
             continue
         for l in lent:
-            # Not asked: its own, or one its lender says is not running, or
-            # holds closed.
-            if not isinstance(l, dict) or l.get("person") == me or l.get("answering") is False or held_of(l.get("held")):
+            # Not asked: this computer's own, by its key, or one its lender
+            # says is not running, or holds closed.
+            if not isinstance(l, dict) or me is not None and key_of(l.get("key")) == me or l.get("answering") is False or held_of(l.get("held")):
                 continue
             label = lend_at(l.get("origin"), at[1])
             if label and label not in candidates:

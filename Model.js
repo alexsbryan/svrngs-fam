@@ -54,6 +54,14 @@ function running(answer) {
   return stateOf(answer) === "running"
 }
 
+// Whether a lend's row is this computer's own: by the key of the computer
+// svrngs listed it for (the helper's `lends_of`), against this computer's
+// (svrngs GET /v1/groups `key`). A display name is any member's to take,
+// so it never decides; with no key from svrngs, no row is this computer's.
+function own(answer, l) {
+  return !!answer && typeof answer.key === "string" && answer.key !== "" && l.key === answer.key
+}
+
 // Groups this person is still in.
 function groups(answer) {
   if (!running(answer)) return []
@@ -66,16 +74,16 @@ function lent(answer) {
   var names = {}
   groups(answer).forEach(function(g) { names[g.id] = g.name })
   // Whether each is running, and whether svrngs holds it closed, as svrngs
-  // lists it to its own groups. A held one's reason, the token it was
-  // listed with and what svrngs read answering on its port are taken from
-  // one row, the first that says it is held: approving sends back what that
-  // row showed.
+  // lists it to its own groups, from this computer's own rows alone (`own`).
+  // A held one's reason, the token it was listed with and what svrngs read
+  // answering on its port are taken from one row, the first that says it is
+  // held: approving sends back what that row showed.
   var answering = {}
   var held = {}
   groups(answer).forEach(function(g) {
     var lends = answer.lends ? answer.lends[g.id] : null
     ;((lends && lends.lent) || []).forEach(function(l) {
-      if (l.person !== g.person) return
+      if (!own(answer, l)) return
       if (l.answering !== null && l.answering !== undefined) answering[l.name] = l.answering
       if (l.held && !held[l.name]) held[l.name] = l
     })
@@ -186,11 +194,11 @@ function freeName(wanted, port, mine) {
   return name
 }
 
-// Each group's lends from other people, for Open.
+// Each group's lends from other computers, for Open.
 function friendsLends(answer, group) {
   var lends = running(answer) && answer.lends ? answer.lends[group.id] : null
   if (!lends || !lends.lent) return []
-  return lends.lent.filter(function(l) { return l.person !== group.person }).map(function(l) {
+  return lends.lent.filter(function(l) { return !own(answer, l) }).map(function(l) {
     return { person: l.person, name: l.name, label: labelOf(l.origin), answering: opens(l) }
   })
 }
@@ -271,7 +279,7 @@ function groupView(answer, group, query) {
       if (hit(l.name, "")) carried.push(item)
       return
     }
-    if (l.person === group.person) return
+    if (own(answer, l)) return
     count += 1
     if (!hit(l.name, l.person)) return
     if (!byPerson[l.person]) { byPerson[l.person] = []; people.push({ person: l.person, items: byPerson[l.person] }) }
