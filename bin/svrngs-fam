@@ -533,7 +533,7 @@ def lends_of(at, secret, namespace):
     }
 
 
-NEWER = "Lending from here needs svrngs 1.13.0 or later. Update svrngs on its home page, then try again."
+NEWER = "Lending from here needs svrngs 1.13.1 or later. Update svrngs on its home page, then try again."
 
 
 def older_svrngs(pid):
