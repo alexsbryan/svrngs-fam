@@ -611,7 +611,58 @@ ShellRoot {
     }
 
     function finish2() {
+      plain()
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+    }
+
+    // Every item under `item` that draws text it is given, as Text and
+    // Omarchy's Text-based pieces do: one with a textFormat and a text.
+    function texts(item, out) {
+      if (!item || out.seen.indexOf(item) >= 0) return out
+      out.seen.push(item)
+      if (item.textFormat !== undefined && typeof item.text === "string") out.found.push(item)
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) texts(kids[i], out)
+      if (item.contentItem) texts(item.contentItem, out)
+      return out
+    }
+
+    // Names anyone in a group sets, each in markup: drawn as typed, never
+    // as rich text, which would draw <img src=…> by fetching it.
+    function plain() {
+      console.log("names are drawn as plain text, never as rich text")
+      var marked = JSON.parse(JSON.stringify(running))
+      marked.groups[0].name = "<i>WorkingGroup</i>"
+      marked.groups[1].name = "<img src=\"http://127.0.0.1:9/x.png\">"
+      marked.lends.g1.lent[0].person = "<u>Fedora</u>"
+      marked.lends.g1.lent[0].name = "<s>deepseek</s>"
+      marked.lends.g1.unanswered = ["<big>Bo</big>"]
+      marked.listeners[0].program = "<b>puma</b>"
+      barPanel.open()
+      show(marked)
+      fam.models = [{ person: "<u>Fedora</u>", key: "kfedora", name: "<s>coder</s>", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
+      barPanel.toggleGroup("g1")
+      barPanel.askLend(barPanel.offers[0])
+      var found = texts(panelOf(barPanel), { seen: [], found: [] }).found
+      var shown = found.map(function(t) { return t.text })
+      var marks = ["<i>WorkingGroup</i>", "<img src=", "<u>Fedora</u>", "<s>deepseek</s>", "<big>Bo</big>", "<b>puma</b>", "<s>coder</s>"]
+      check("each name is drawn by some text in the panel",
+            JSON.stringify(marks.filter(function(m) { return !shown.some(function(s) { return s.indexOf(m) >= 0 }) })), "[]")
+      check("and every text that draws one is plain text",
+            JSON.stringify(found.filter(function(t) { return t.text.indexOf("<") >= 0 && t.textFormat !== Text.PlainText }).map(function(t) { return t.text })), "[]")
+      barPanel.lending = null
+      barPanel.close()
+    }
+
+    // The panel's content, as qs.Ui's KeyboardPanel loads it while open.
+    function panelOf(item) {
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i].loadedContent !== undefined) return kids[i].loadedContent
+        var inner = panelOf(kids[i])
+        if (inner) return inner
+      }
+      return null
     }
 
     Timer {
