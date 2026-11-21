@@ -61,9 +61,16 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     (plugin / "keys/svrngs-release-key.asc").write_bytes(exported)
     (plugin / "keys/svrngs-release-key.fpr").write_text(release_key + "\n")
 
-    # An installer that takes --archive, as svrngs's will: it keeps what it
-    # was given, to be checked here.
-    takes = '#!/bin/sh\n# install.sh <link> --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\ncp "$3" "$HOME/installed-archive"\necho "svrngs runs now."\n'
+    # An installer that takes --archive, as svrngs's does: it keeps what it
+    # was given, to be checked here, and keeps the page svrngs takes its
+    # updates from as svrngs's web/install.sh keeps it (`from`, written to
+    # the data directory's `origin`, which svrngs's updater reads):
+    # $SVRNGS_FROM, else the link's page.
+    keeps = 'from="${SVRNGS_FROM:-${1%%#*}}"\n'
+    takes = ('#!/bin/sh\n# install.sh <link> --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\ncp "$3" "$HOME/installed-archive"\n'
+             '{KEEPS}mkdir -p "$HOME/.svrngs" && printf "%s" "$from" > "$HOME/.svrngs/origin"\necho "svrngs runs now."\n')
+    ignores = takes.replace("{KEEPS}", 'from="${1%%#*}"\n')
+    takes = takes.replace("{KEEPS}", keeps)
     old = '#!/bin/sh\n# fetches svrngs from the page\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
     archive = b"the svrngs release built"
 
@@ -86,27 +93,51 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     release("impostor-sums", sums_by=impostor)
     release("other-archive", archive_bytes=b"something else")
     release("old-installer", installer=old)
+    release("ignores-from", installer=ignores)
     (served / "empty").mkdir()
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Quiet, directory=str(served)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    def get(name, *args):
+    homes = []
+
+    def get(name, *args, page=None):
         home = Path(tempfile.mkdtemp(dir=scratch))
+        homes.append(home)
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "SVRNGS_FAM_SVRNGS": "",
                "SVRNGS_FAM_RELEASES": f"http://127.0.0.1:{server.server_address[1]}/{name}"}
+        if page is not None:
+            env["SVRNGS_FROM"] = page
         done = subprocess.run([str(plugin / "bin/svrngs-fam"), "get", *args], capture_output=True, text=True, env=env, timeout=120)
         ran = home / "installed-with"
         given = home / "installed-archive"
         return (json.loads(done.stdout), ran.read_text().split("\n")[:-1] if ran.exists() else None,
                 given.read_bytes() if given.exists() else None)
 
+    def updates_from():
+        """The page the last install keeps for svrngs's updates, as its
+        installer wrote it."""
+        kept = homes[-1] / ".svrngs/origin"
+        return kept.read_text() if kept.exists() else None
+
+    INVITE = "https://page.example/#AbCdEf0123456789"
+
     print("a release signed by the release key, its archive matching")
     said, ran, given = get("good")
     check("installs", said["ok"], True)
     check("the installer is run for the page, given the archive", (ran or [None, None])[:2], [PAGE, "--archive"])
     check("the archive it is given is the release's, checked", given, archive)
-    said, ran, given = get("good", "--link", "svrngs:AbCdEf0123456789")
-    check("with an invite link, the link is only what it joins", (ran or [None])[0], "svrngs:AbCdEf0123456789")
+    check("svrngs takes its updates from svrngs's own page", updates_from(), PAGE)
+    said, ran, given = get("good", "--link", INVITE)
+    check("with an invite link, the link is only what it joins", (ran or [None])[0], INVITE)
+    check("and svrngs takes its updates from svrngs's own page, never the invite's", updates_from(), PAGE)
+    said, ran, given = get("good", "--link", INVITE, page="https://mirror.example/svrngs")
+    check("SVRNGS_FROM names another page to update from", (said["ok"], updates_from()), (True, "https://mirror.example/svrngs/"))
+    for page in ("https://mirror.example/#x", "mirror.example", "ftp://mirror.example/", "https://mirror example/"):
+        said, ran, given = get("good", "--link", INVITE, page=page)
+        check(f"SVRNGS_FROM {page!r}, not a page's address, is refused, nothing run", (said["ok"], ran), (False, None))
+    said, ran, given = get("ignores-from", "--link", INVITE)
+    check("an installer that kept the invite's page for updates is said so, not called done",
+          (said["ok"], "https://page.example/" in said["said"]), (False, True))
 
     print("anything else is never run")
     for name, why in (("tampered", "an installer changed after it was signed"),

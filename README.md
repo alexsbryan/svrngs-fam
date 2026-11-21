@@ -29,6 +29,13 @@ alone, with no password. The invite link is used only to join your
 friend's group. Your browser then opens your home page, where you start a
 group or join theirs.
 
+svrngs then takes its updates from svrngs's own page,
+[group.svrnme.sh](https://group.svrnme.sh/), whatever page your invite
+came from, and checks each against the svrngs release key before it
+replaces itself. To have it update from another page, set `SVRNGS_FROM` to
+that page's address in the environment your Omarchy session starts with,
+before you press Get svrngs.
+
 The plugin uses python, ss, wl-copy and gpg, which Omarchy already has.
 
 svrngs and the plugin are also built as Arch packages, for Omarchy's own

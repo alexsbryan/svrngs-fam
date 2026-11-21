@@ -798,9 +798,15 @@ def invite(group):
 # files directly, for the tests; whose signature they need is only ever the
 # key in ../keys.
 RELEASES = "https://github.com/alexsbryan/svrngs/releases"
-# Where the installer gets svrngs when there is no invite link: the page
-# svrngs's README starts a group from.
+# svrngs's own page, the one svrngs's README starts a group from: where
+# svrngs installed from here takes its updates, whatever the invite link.
+# svrngs's updater reads that page's get/SHA256SUMS and its signature (svrngs
+# update.rs `latest`); the release downloads above have no get/. SVRNGS_FROM
+# names another page, as it does for svrngs's own installer (web/install.sh).
 PAGE = "https://group.svrnme.sh/"
+# A page's address as svrngs keeps one: http(s), no `#` (svrngs-core link.rs
+# `Origin`, which install.sh's `from` must be).
+PAGE_AT = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?(/[^\s#'\"]*)?")
 KEYS = Path(__file__).resolve().parent.parent / "keys"
 MAX_TEXT_FILE = 1024 * 1024
 MAX_ARCHIVE = 64 * 1024 * 1024
@@ -854,16 +860,35 @@ def signed_by_release_key(name, data, signature, home):
     return checked.returncode == 0 and any(pinned in (v[2].upper(), v[-1].upper()) for v in valid)
 
 
+def update_page():
+    """The page svrngs installed from here takes its updates from: svrngs's
+    own, PAGE, unless SVRNGS_FROM names another; with the `/` install.sh
+    puts at its end. None when SVRNGS_FROM names no page."""
+    named = os.environ.get("SVRNGS_FROM", "").strip()
+    page = named or PAGE
+    if not PAGE_AT.fullmatch(page):
+        return None
+    return page if page.endswith("/") else page + "/"
+
+
 def get_svrngs(link):
     """svrngs installed by its own installer, for this person alone, without
     root, then their home page opens (svrngs web/install.sh). Everything
     comes from one svrngs release and is checked before anything runs: the
     installer and the release's SHA256SUMS against the svrngs release key,
     and svrngs's archive against those sums. The installer is then given
-    that archive, so the invite link, or the page, is used only to join and
-    never to say what svrngs is."""
+    that archive, so the invite link is used only to join and never to say
+    what svrngs is; and it is told svrngs's own page as the page svrngs
+    updates from (`update_page`), SVRNGS_FROM, which it keeps over the
+    link's (install.sh `from`), so the invite never says what svrngs
+    becomes either. What it kept is read back after, and said if it
+    isn't that page."""
     if link is not None and not LINK.fullmatch(link):
         return {"ok": False, "said": "That doesn't look like a svrngs invite link. Paste the whole link your friend sent."}
+    page = update_page()
+    if page is None:
+        said = text(os.environ.get("SVRNGS_FROM", "").strip())
+        return {"ok": False, "said": f"SVRNGS_FROM is {said!r}, which isn't a page's address, so nothing was installed. Set it to the page svrngs should update from, as https://group.svrnme.sh/ is, or unset it."}
     if shutil.which("gpg") is None:
         return {"ok": False, "said": "gpg isn't installed, so svrngs can't be checked. Install gnupg, then try again."}
     arch = ARCHES.get(os.uname().machine)
@@ -898,13 +923,22 @@ def get_svrngs(link):
         archive = home / archive_name
         archive.write_bytes(files[archive_name])
         try:
-            done = subprocess.run(["sh", str(home / "install.sh"), link or PAGE, "--archive", str(archive)],
+            done = subprocess.run(["sh", str(home / "install.sh"), link or page, "--archive", str(archive)],
+                                  env={**os.environ, "SVRNGS_FROM": page},
                                   stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
         except subprocess.TimeoutExpired:
             return {"ok": False, "said": "svrngs's installer didn't finish within ten minutes."}
     said = "\n".join(line for line in (done.stdout + done.stderr).strip().splitlines()[-6:])
     if done.returncode != 0:
         return {"ok": False, "said": said or f"svrngs's installer stopped (exit {done.returncode})."}
+    # The page the installer kept for updates, by the name svrngs's updater
+    # reads (svrngs invite.rs `ORIGIN_FILE`, in the data directory).
+    try:
+        kept = (data_dir() / "origin").read_text().strip()
+    except OSError as e:
+        return {"ok": False, "said": f"svrngs is installed and running, but which page it takes its updates from can't be read: {e.strerror}."}
+    if kept.rstrip("/") != page.rstrip("/"):
+        return {"ok": False, "said": f"svrngs is installed and running, but it takes its updates from {text(kept)}, not {page}. Its installer didn't keep the page it was given."}
     return {"ok": True, "said": "svrngs is installed and running. Your home page opens in your browser."}
 
 
