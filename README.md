@@ -7,8 +7,9 @@ Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 Lend the app you're running, use your friends' models, and open what your
 groups share, from one icon.
 
-Nothing is lent until you say yes twice, and a share reaches only the
-program you approved: svrngs refuses anything else that answers on its port. Your svrngs key stays on your
+Nothing is lent until you say yes twice. A share reaches only the program
+you approved: when another program answers on its port, svrngs refuses it,
+and the panel offers Keep sharing it, which approves the one there now. Your svrngs key stays on your
 computer. While its panel is closed, the plugin reads svrngs only when the
 bar starts and each time svrngs starts. If svrngs was updated but the old
 one is still running, the plugin restarts it once to use the new one.
@@ -43,9 +44,10 @@ before you press Get svrngs.
 
 The plugin uses python, ss, wl-copy and gpg, which Omarchy already has.
 
-svrngs and the plugin are also built as Arch packages, for Omarchy's own
-package repository, which signs what it ships; they're in
-[svrngs-omarchy](https://github.com/alexsbryan/svrngs-omarchy).
+svrngs and the plugin are also kept as Arch packages in
+[svrngs-omarchy](https://github.com/alexsbryan/svrngs-omarchy), ready for
+Omarchy's own package repository, which signs what it ships. That repository
+doesn't carry them yet.
 
 ## Remove
 

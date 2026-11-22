@@ -1005,6 +1005,19 @@ fake.lends = {"lent": [{**fake.lends["lent"][0], "key": "not a key"}, {**fake.le
 check("a key that is none passes as none", [l["key"] for l in state(home, "--full")["lends"]["a" * 64]["lent"]], [None, None])
 fake.close()
 
+home = case("models: a friend's answer nested past Python's stack is no model, and every other friend's is listed")
+fake = Fake()
+data_dir(home, port=fake.port)
+fake.lends = {"lent": [
+    {"person": "Fedora", "key": "d" * 64, "name": "coder", "kind": "llama-server", "origin": f"http://model1.localhost:{fake.port}/"},
+    {"person": "Mallory", "key": "f" * 64, "name": "deep", "kind": "llama-server", "origin": f"http://model7.localhost:{fake.port}/"},
+]}
+fake.models = {"model1": ["qwen3-coder"], "model7": b'{"data": ' + b"[" * 120000 + b"]" * 120000 + b"}"}
+got, _ = run(home, "models")
+check("the deep answer is no model, and the other friend's model is listed",
+      [(m["person"], m["name"], m["models"]) for m in (got or {}).get("models", [])], [("Fedora", "coder", ["qwen3-coder"])])
+fake.close()
+
 home = case("a held lend of this computer's: why, what svrngs read on its port, and its token")
 fake = Fake()
 data_dir(home, port=fake.port)

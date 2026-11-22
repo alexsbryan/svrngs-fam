@@ -89,7 +89,8 @@ class Fake:
         does while it starts (node.rs `start_on`)."""
         self.mode = mode
         self.seen = []
-        # Lends' labels that answer as a model, and the model names they give.
+        # Lends' labels that answer as a model, and the model names they give,
+        # or the bytes they answer.
         self.models = {}
         # Lends' labels whose program does not answer: svrngs says 502.
         self.down = set()
@@ -168,7 +169,11 @@ class Fake:
                 if host.endswith(f".localhost:{fake.port}"):
                     label = host.split(".")[0]
                     if label in fake.models and self.path == "/v1/models":
-                        return self.answer(200, {"object": "list", "data": [{"id": m} for m in fake.models[label]]})
+                        listed = fake.models[label]
+                        # Bytes as they are, for an answer that isn't a list's shape.
+                        if isinstance(listed, bytes):
+                            return self.answer(200, listed)
+                        return self.answer(200, {"object": "list", "data": [{"id": m} for m in listed]})
                     if label in fake.down:
                         return self.answer(502, {"error": "the lend's program did not answer"})
                     return self.answer(404, b"Not Found", "text/plain")

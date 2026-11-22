@@ -1146,7 +1146,8 @@ def keep_sharing(name, shown, process):
     account's, and changes nothing else of the share (svrngs surface.rs
     `approve`, share.rs `approve`; eudoxia binding.rs `approve`). A pid
     and its start are sent together, as svrngs takes them. Asked of the API
-    with the token, as svrngs's home page asks it."""
+    as everything here asks it: svrngs proved first, then a code for that
+    connection alone, never the token (`Proven`)."""
     held, refused = connected()
     if refused:
         return refused
@@ -1261,7 +1262,10 @@ def models(skip=frozenset()):
             listed = json.loads(raw).get("data")
             ids = [text(m.get("id")) for m in listed if isinstance(m, dict) and m.get("id")] if isinstance(listed, list) else []
             return ids[:MAX_ROWS]
-        except (ValueError, AttributeError):
+        # A friend's lend answers this, so whatever its answer holds: a
+        # ValueError for what isn't JSON, and a RecursionError for nesting
+        # deeper than this Python's stack goes, as `shown_proof` reads one.
+        except (ValueError, AttributeError, RecursionError):
             return []
         except (OSError, http.client.HTTPException, Unreadable):
             return None
