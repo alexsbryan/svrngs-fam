@@ -7,10 +7,11 @@ Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 Lend the app you're running, use your friends' models, and open what your
 groups share, from one icon.
 
-Nothing is lent until you say yes twice. A share reaches only the program
-you approved: when another program answers on its port, svrngs refuses it,
-and the panel offers Keep sharing it, which names the groups the share
-goes to and asks again before it approves the one there now.
+Nothing is lent until you say yes twice. A share reaches only the process
+you chose, and what it starts: when another program answers on its port,
+svrngs refuses it, and the panel offers Keep sharing it, which names the
+groups the share goes to and asks again before it approves the one there
+now.
 Copy address on a friend's model says what Play lets in before it turns
 Play on: any program of yours on this computer can then use that model
 with no key, until you press Stop. Your svrngs key stays on your computer.

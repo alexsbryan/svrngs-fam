@@ -65,7 +65,7 @@
   "keep.nobody": "no group now",
   "action.invite": "Invite",
   "action.makeLink": "Make link",
-  "invite.question": "A new invite link to %1 stops any earlier link letting new people in. Everyone already in stays.",
+  "invite.question": "Anyone with a new link can join %1 for a day, while this computer is on. It stops the last link you made here letting new people in; links others made still work, and everyone already in stays.",
   "working": "Working…",
   "find.placeholder": "Type to find an app, a model or a person",
   "find.none": "Nothing in your groups is called “%1”",

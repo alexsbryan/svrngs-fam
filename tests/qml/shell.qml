@@ -808,7 +808,8 @@ ShellRoot {
       var has = function(t) { return drawn.some(function(d) { return d.indexOf(t) >= 0 }) }
       check("drawn: each group's line, and Lend's question, say which House it is",
             [has("▸ House (Dana’s, since 3 Nov)"), has("▾ House (yours, since 3 Nov)"), has("Lend garden to House (Dana’s, since 3 Nov)?")].join(","), "true,true,true")
-      check("and the invite question", has("A new invite link to House (yours, since 3 Nov)"), true)
+      check("and the invite question, which says who can join with a new link, for how long, and which link it stops",
+            has("Anyone with a new link can join House (yours, since 3 Nov) for a day, while this computer is on. It stops the last link you made here letting new people in; links others made still work, and everyone already in stays."), true)
       barPanel.lending = null
       barPanel.inviting = ""
       barPanel.openGroup = ""
