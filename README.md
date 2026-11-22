@@ -20,7 +20,8 @@ While its panel is closed, the plugin reads svrngs only when the bar
 starts and each time svrngs starts. If svrngs was updated but the old one
 is still running, the plugin restarts it once to use the new one. It never
 starts an svrngs older than 1.13.3, the first it works with: it offers Get
-svrngs instead.
+svrngs instead, or, for an svrngs a package installed, says to update it
+the way it was installed.
 
 ![The svrngs panel, open on a group called House](preview.png)
 
@@ -33,11 +34,12 @@ omarchy plugin add https://github.com/alexsbryan/svrngs-fam --enable
 ```
 
 Click the people icon in your bar. If svrngs isn't on your computer yet,
-or it's older than 1.13.3, press Get svrngs. If a friend sent you an invite
-link, paste it first: svrngs then joins your friend's group right away,
-before your home page opens, under the name the panel shows, which you can
-change. That name starts as your account's full name, else its login name,
-as svrngs reads it.
+or an svrngs older than 1.13.3 is in `~/.local/bin`, press Get svrngs; an
+older svrngs a package installed is updated the way it was installed. If a
+friend sent you an invite link, paste it first: svrngs then joins your
+friend's group right away, before your home page opens, under the name the
+panel shows, which you can change. That name starts as your account's full
+name, else its login name, as svrngs reads it.
 
 The plugin downloads svrngs and its installer from svrngs's latest
 release, checks both against the svrngs release key, and installs svrngs

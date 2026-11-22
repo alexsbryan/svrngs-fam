@@ -478,8 +478,12 @@ def behind(run, kept):
     later. The one decider of whether the panel starts svrngs: `start` and
     `renewal`'s restart start nothing while it names one, and a stopped
     svrngs's read says so before anything is pressed (`stopped_here`)."""
-    for program in dict.fromkeys(p for p in (run, kept.program if kept else None) if p):
-        said = kept.version if kept and program == kept.program else version(program)
+    # The service's program even where it can't be read, "" (`service`).
+    programs = [run] if run else []
+    if kept is not None and kept.program not in programs:
+        programs.append(kept.program)
+    for program in programs:
+        said = kept.version if kept is not None and program == kept.program else version(program)
         if said is None or said < FLOOR:
             return Old(program, said)
     return None
@@ -491,13 +495,16 @@ def gettable(old):
     (svrngs web/install.sh `put`, at v1.13.3) and runs from its own login
     service (install.sh `keep`). Another, a package's, is updated as it
     was installed."""
-    return os.path.realpath(old.program) == os.path.realpath(Path.home() / ".local/bin/svrngs")
+    return old.program != "" and os.path.realpath(old.program) == os.path.realpath(Path.home() / ".local/bin/svrngs")
 
 
 def too_old(old, doing):
     """What the panel says when `old` (`behind`) keeps it from `doing`:
     which svrngs, what it says of its version, why the panel starts none
     older than NEEDS, and the way on (`gettable`)."""
+    if old.program == "":
+        return (f"svrngs's login service runs a program this panel can't read from it, so the panel won't {doing}: "
+                f"if it is an svrngs older than {NEEDS}, its shares would open under older rules. See what it runs with: systemctl --user cat svrngs")
     which = "This svrngs" if gettable(old) else f"The svrngs at {old.program}"
     if old.version:
         said = f"{which} is {version_of(old)}, older than {NEEDS}, so the panel won't {doing}: its shares would open under older rules."
@@ -577,7 +584,9 @@ def service():
     """svrngs's login service, as `systemctl --user show` says it: the
     program its ExecStart runs, the data dir it keeps (its SVRNGS_DIR, else
     ~/.svrngs, as svrngs takes it), and that program's version (`version`).
-    None when systemd keeps no such service here."""
+    None when systemd keeps no such service here. One it keeps whose
+    ExecStart this can't read, as a path with a space in it, is kept as a
+    program named "" that says no version, so nothing starts it (`behind`)."""
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         return None
@@ -588,10 +597,12 @@ def service():
         return None
     said = dict(line.partition("=")[::2] for line in done.stdout.splitlines())
     program = re.match(r"\{ path=(/\S+) ;", said.get("ExecStart", ""))
-    if done.returncode != 0 or said.get("LoadState") != "loaded" or program is None:
+    if done.returncode != 0 or said.get("LoadState") != "loaded":
         return None
     named = re.search(r"(?:^| )SVRNGS_DIR=(/\S+)", said.get("Environment", ""))
     data = named.group(1) if named else str(Path.home() / ".svrngs")
+    if program is None:
+        return Kept("", os.path.realpath(data), None)
     return Kept(program.group(1), os.path.realpath(data), version(program.group(1)))
 
 

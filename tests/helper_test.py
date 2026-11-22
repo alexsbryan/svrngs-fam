@@ -129,10 +129,12 @@ STUBS = {
     # systemctl, as the helper asks it what svrngs's login service starts:
     # $HOME/service holds its program, then its SVRNGS_DIR, a line each;
     # without them, the stand-in svrngs command and none. With
-    # $HOME/no-service, systemd keeps no such service.
+    # $HOME/no-service, systemd keeps no such service; $HOME/service-exec
+    # holds an ExecStart said whole.
     "systemctl": r"""#!/bin/bash
 [ "$*" = "--user show svrngs.service --property=LoadState,ExecStart,Environment" ] || exit 1
 if [ -e "$HOME/no-service" ]; then printf 'LoadState=not-found\nExecStart=\nEnvironment=\n'; exit 0; fi
+if [ -e "$HOME/service-exec" ]; then printf 'LoadState=loaded\nExecStart=%s\nEnvironment=PATH=/usr/bin:/bin\n' "$(cat "$HOME/service-exec")"; exit 0; fi
 program=$(sed -n 1p "$HOME/service" 2>/dev/null); dir=$(sed -n 2p "$HOME/service" 2>/dev/null)
 program=${program:-$HOME/.local/bin/svrngs}
 echo "LoadState=loaded"
@@ -1448,6 +1450,12 @@ STARTS = (
     ("the service's program saying no version the panel can read", "1.13.3", ("odd-svrngs", "svrngs one point thirteen"),
      older_words("The svrngs at {home}/odd-svrngs", None) + " " + UPDATE_WAY),
     ("no login service, the command at 1.12.2", "1.12.2", "none", older_words("This svrngs", "1.12.2") + " " + GET_WAY),
+    # As systemd says a program at a path with a space in it, which the
+    # helper can't read; the command at 1.13.3.
+    ("the service's ExecStart one the panel can't read", "1.13.3",
+     ("exec", "{ path=/home/sam/My Apps/svrngs ; argv[]=/home/sam/My Apps/svrngs ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"),
+     "svrngs's login service runs a program this panel can't read from it, so the panel won't start it: if it is an svrngs older than 1.13.3, "
+     "its shares would open under older rules. See what it runs with: systemctl --user cat svrngs"),
     ("the command and its service's program at 1.13.3", "1.13.3", None, None),
     ("no login service, the command at 1.13.3", "1.13.3", "none", None),
 )
@@ -1457,6 +1465,8 @@ for title, command, starts, said in STARTS:
     (home / "installed-version").write_text(command)
     if starts == "none":
         (home / "no-service").touch()
+    elif starts and starts[0] == "exec":
+        (home / "service-exec").write_text(starts[1])
     elif starts:
         (home / "service").write_text(f"{answering_version(home / starts[0], starts[1])}\n")
     said = said and said.format(home=home)
