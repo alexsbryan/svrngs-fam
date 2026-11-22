@@ -23,9 +23,10 @@ itself offscreen, which needs Omarchy's shell. No test reaches the svrngs on you
 computer. The helper's test plays another account on this computer with
 `unshare --map-auto`, which needs your account to have a range in
 `/etc/subuid`, as rootless Podman does; without one, that check fails. Its
-stand-in svrngs proves it holds svrngs's key before the helper sends it, as
-svrngs does, and the helper's proof is checked against the test vectors
-svrngs and Give are held to.
+stand-in svrngs proves it holds svrngs's key, then takes a request only
+with the code made from that key for the one connection it came on, as
+svrngs does; the key itself it refuses. The helper's proof and code are
+checked against the test vectors svrngs and Give are held to.
 
 ## Packages
 

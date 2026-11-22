@@ -1,7 +1,9 @@
 """A stand-in for svrngs's API, as the helper meets it: a loopback HTTP server
 that proves it holds TOKEN to a challenge (`POST /v1/proof`, `proof`), with no
-token asked, and answers `/v1/groups`, `/v1/lends`, `POST
-/v1/lends/<name>/approve` and `/v1/play` only with the right bearer token. It
+token asked, giving a nonce for that connection alone; and answers
+`/v1/groups`, `/v1/lends`, `POST /v1/lends/<name>/approve` and `/v1/play` only
+when asked with that connection's code (`ask`), as svrngs 1.13.3 does. It
+refuses the token itself, `Authorization: Bearer`, with what to use instead. It
 refuses any request carrying `Origin` or `Sec-Fetch-Site`, as svrngs does (svrngs
 api.rs:199-210), and keeps each connection open for the next request, as
 svrngs does over HTTP/1.1. `mode` makes it answer the ways svrngs can go wrong:
@@ -14,6 +16,7 @@ import hmac
 import itertools
 import json
 import re
+import secrets
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +30,19 @@ def proof(token, challenge, client, server):
     connection's two ends as svrngs names them, a line each."""
     said = "\n".join(("svrngs proof v1", challenge, client, server))
     return hmac.new(token.encode(), said.encode(), hashlib.sha256).hexdigest()
+
+
+def ask(token, nonce, client, server):
+    """The code a program asks svrngs with on one connection, made apart
+    from the helper's: HMAC-SHA256 under the token of "svrngs ask v1",
+    the nonce svrngs gave on that connection, and its two ends."""
+    said = "\n".join(("svrngs ask v1", nonce, client, server))
+    return hmac.new(token.encode(), said.encode(), hashlib.sha256).hexdigest()
+
+
+# What svrngs 1.13.3 says to a program that sends its token, in the
+# stand-in's words.
+REFUSED_TOKEN = "svrngs doesn't take its token from a program any more: ask through `svrngs ask <route>`"
 
 
 def named(address):
@@ -105,8 +121,23 @@ class Fake:
 
             def setup(self):
                 super().setup()
-                # Which connection each request came on, counted from 1.
+                # Which connection each request came on, counted from 1,
+                # and the nonce svrngs gave on it, once it proved itself.
                 self.connection_number = next(connections)
+                self.nonce = None
+
+            def refused(self):
+                """Why this request isn't asked as svrngs takes it, or
+                None when it is: with the code for this connection's nonce
+                and its own two ends, as svrngs 1.13.3 takes it."""
+                shown = self.headers.get("Authorization") or ""
+                if shown.lower().startswith("bearer "):
+                    return REFUSED_TOKEN
+                given = shown[len("Svrngs "):] if shown.startswith("Svrngs ") else ""
+                if self.nonce is None:
+                    return "no proof was asked on this connection"
+                made = ask(TOKEN, self.nonce, named(self.client_address), named(self.connection.getsockname()))
+                return None if given and hmac.compare_digest(given, made) else "no ask, or not this connection's"
 
             def seen(self, **more):
                 fake.seen.append({"path": self.path, "headers": dict(self.headers), "conn": self.connection_number, **more})
@@ -125,8 +156,8 @@ class Fake:
                 self.seen()
                 if self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"):
                     return self.answer(403, {"error": "this API answers programs on this computer, not pages"})
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    return self.answer(401, {"error": "no token"})
+                if self.refused():
+                    return self.answer(401, {"error": self.refused(), "kind": "no_token"})
                 if fake.mode == "error":
                     return self.answer(500, {"error": "the record could not be read"})
                 if fake.mode == "not-json":
@@ -163,8 +194,8 @@ class Fake:
                     # asked with no token, as axum's own 404, empty, as
                     # svrngs 1.11.1 does.
                     return self.prove(body) if fake.mode != "old" else self.answer(404, b"", "text/plain")
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    return self.answer(401, {"error": "no token"})
+                if self.refused():
+                    return self.answer(401, {"error": self.refused(), "kind": "no_token"})
                 if self.path == "/v1/open":
                     asked = json.loads(body or b"{}")
                     label = asked.get("lend") or "svrngs"
@@ -187,7 +218,9 @@ class Fake:
                 if not isinstance(challenge, str) or not re.fullmatch(r"[0-9a-f]{64}", challenge):
                     return self.answer(422, b"Failed to deserialize the JSON body", "text/plain")
                 made = proof(TOKEN, challenge, named(self.client_address), named(self.connection.getsockname()))
-                return self.answer(200, {"proof": made}, closing=fake.mode == "closes")
+                # A later proof on this connection replaces its nonce.
+                self.nonce = secrets.token_hex(32)
+                return self.answer(200, {"proof": made, "nonce": self.nonce}, closing=fake.mode == "closes")
 
             def approve(self, name, body):
                 """svrngs surface.rs `approve` and share.rs `approve`, in

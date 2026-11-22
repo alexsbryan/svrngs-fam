@@ -36,8 +36,9 @@ Verbs:
                                   earlier than svrngs 1.13.3's (SIGNED_SINCE)
 
 It reads svrngs's public surface only: the `svrngs` command, the `api` and
-`token` files in svrngs's data directory, and the `/v1/` routes behind the
-token, which it sends only once svrngs has proved it holds it (`dial`). It
+`token` files in svrngs's data directory, and the `/v1/` routes it asks
+with that token's code for one connection, never the token itself, once
+svrngs has proved it holds it there (`dial`). It
 also reads `lends/*.json` there, a file format svrngs does not promise, for
 the one fact no route gives: which port each lend serves.
 """
@@ -158,16 +159,22 @@ def ask(at, secret, method, path, body=None, timeout=TIMEOUT):
     return answer
 
 
-# svrngs proves it holds the token before the helper sends it, on the
-# connection the helper then sends it on (svrngs POST /v1/proof, from
-# 1.13.3). The helper asks with a challenge, 32 random bytes in hex, new
-# each time. svrngs answers with HMAC-SHA256, keyed by the token as its
-# token file keeps it, of PROOF_OF, the challenge, and that connection's
-# two ends as svrngs sees them: the helper's, then its own (`proof`). A
-# program without the token can't make it. Nor can a relay pass on
-# svrngs's own: svrngs would make it for the relay's connection, whose ends
-# aren't the helper's.
+# svrngs's token never leaves this helper: svrngs 1.13.3 refuses it from a
+# program, and the helper asks with a code made from it for one connection
+# instead. On one connection to svrngs's address (svrngs POST /v1/proof):
+# - The helper sends a challenge, 32 random bytes in hex, new each time.
+# - svrngs answers its proof, HMAC-SHA256 keyed by the token as its token
+#   file keeps it, of PROOF_OF, the challenge, and that connection's two
+#   ends as svrngs sees them, the helper's, then its own (`proof`); and a
+#   nonce of its own, kept for that connection alone. A program without the
+#   token can't make the proof, nor can a relay pass on svrngs's, made for
+#   the relay's connection, whose ends aren't the helper's.
+# - Proved, the helper asks on that same connection with `Authorization:
+#   Svrngs <ask>`: HMAC-SHA256 under the token of ASK_OF, the nonce, and the
+#   same two ends (`ask_for`). svrngs takes it only on that connection, so
+#   whatever reads it has nothing to use anywhere else.
 PROOF_OF = "svrngs proof v1"
+ASK_OF = "svrngs ask v1"
 # How long, in seconds, the helper waits for svrngs's proof. svrngs listens
 # before it answers while it starts: node.rs `start_on` binds its API
 # (api.rs `bind`), then builds the rest before it serves, and a connection
@@ -187,6 +194,13 @@ def proof(secret, challenge, client, server):
     return hmac.new(secret.encode(), said.encode(), hashlib.sha256).hexdigest()
 
 
+def ask_for(secret, nonce, client, server):
+    """The code the helper asks svrngs with, on the connection from
+    `client` to `server` for which svrngs gave `nonce`, in lowercase hex."""
+    said = f"{ASK_OF}\n{nonce}\n{client}\n{server}"
+    return hmac.new(secret.encode(), said.encode(), hashlib.sha256).hexdigest()
+
+
 def end(name):
     """One end of a connection as svrngs names it, by Rust's SocketAddr:
     127.0.0.1:50000, or [::1]:50001. `name` is a socket's, as Python gives
@@ -196,16 +210,16 @@ def end(name):
 
 
 def shown_proof(raw):
-    """The proof in an answer to a challenge, `{"proof": "<hex>"}`, or ""
-    when it holds none in that shape."""
+    """The proof and the nonce in an answer to a challenge, `{"proof":
+    "<hex>", "nonce": "<hex>"}`, each "" when it holds none in that shape."""
     try:
         said = json.loads(raw) if len(raw) <= MAX_PROOF else None
     # Whatever reading it raises: a ValueError for what isn't JSON, and a
     # RecursionError for nesting deeper than this Python's stack goes.
     except Exception:
-        return ""
-    shown = said.get("proof") if isinstance(said, dict) else None
-    return shown if isinstance(shown, str) and PROVED.fullmatch(shown) else ""
+        return "", ""
+    shown = [said.get(k) if isinstance(said, dict) else None for k in ("proof", "nonce")]
+    return tuple(v if isinstance(v, str) and PROVED.fullmatch(v) else "" for v in shown)
 
 
 def other(port):
@@ -216,13 +230,15 @@ def other(port):
 
 
 def proved(conn, secret, port):
-    """The socket of `conn`, just connected to svrngs's address, once what
-    answers there has proved it holds `secret` on it (PROOF_OF), sent the
-    challenge and nothing else. Refused as Unreadable, the token sent
-    nowhere: Older when svrngs has no such route, an svrngs before 1.13.3;
-    any other answer, a proof that isn't svrngs's for this connection
-    among them; no answer within PROOF_WITHIN; and a connection that closes
-    after the proof, which leaves none to send on."""
+    """The socket of `conn`, just connected to svrngs's address, and the
+    code to ask on it with (`ask_for`), once what answers there has proved
+    it holds `secret` on it (PROOF_OF), sent the challenge and nothing else.
+    Refused as Unreadable, nothing more sent: Older when svrngs has no such
+    route, an svrngs before 1.13.3; NEWER when it proves itself and gives
+    no nonce, a build before it; any other answer, a proof that isn't
+    svrngs's for this connection among them; no answer within PROOF_WITHIN;
+    and a connection that closes after the proof, which leaves none to send
+    on."""
     sock = conn.sock
     # The helper's end is the one svrngs sees the connection from, and the
     # end the helper reached is svrngs's own.
@@ -242,33 +258,38 @@ def proved(conn, secret, port):
                          "so the panel sent it none of your token") from None
     if reply.status == 404:
         raise Older()
-    if reply.status != 200 or not hmac.compare_digest(shown_proof(raw), proof(secret, challenge, client, server)):
+    shown, nonce = shown_proof(raw)
+    if reply.status != 200 or not hmac.compare_digest(shown, proof(secret, challenge, client, server)):
         raise Unreadable(other(port))
+    # Proved, with no nonce to ask with: an svrngs built before 1.13.3.
+    if not nonce:
+        raise Unreadable(NEWER)
     # The answer read whole, and the connection still open: one whose
     # answer said to close it, http.client has closed (`getresponse`).
     if conn.sock is not sock or not reply.isclosed():
         raise Unreadable(f"svrngs closed the connection it proved itself on, at port {port}, so the panel sent it none of your token. "
                          "Try again in a moment")
-    return sock
+    return sock, ask_for(secret, nonce, client, server)
 
 
 class Proven:
     """A connection on which svrngs proved it holds the token (`dial`),
-    and the one way the helper sends that token: on that socket, never
-    another. http.client connects again by itself to send on a connection
-    an answer closed (HTTPConnection.send, while its auto_open is set),
-    which `dial` turns off, and each request is sent only while the
+    and the one way the helper asks svrngs: with the code for that
+    connection (`ask_for`), on that socket, never another. It holds the
+    code, never the token. http.client connects again by itself to send on
+    a connection an answer closed (HTTPConnection.send, while its auto_open
+    is set), which `dial` turns off, and each request is sent only while the
     connection holds the socket svrngs proved itself on."""
 
-    def __init__(self, conn, sock, secret, timeout):
-        self.conn, self.sock, self.secret = conn, sock, secret
-        sock.settimeout(timeout)
+    def __init__(self, conn, proved, timeout):
+        (self.sock, self.ask), self.conn = proved, conn
+        self.sock.settimeout(timeout)
 
     def send(self, method, path, payload=None, headers=None):
-        """svrngs's reply to one request, sent with the token."""
+        """svrngs's reply to one request, asked with the code."""
         if self.conn.sock is not self.sock:
             raise Unreadable(f"{path} wasn't asked: the connection svrngs proved itself on had closed")
-        self.conn.request(method, path, body=payload, headers={**(headers or {}), "Authorization": f"Bearer {self.secret}"})
+        self.conn.request(method, path, body=payload, headers={**(headers or {}), "Authorization": f"Svrngs {self.ask}"})
         return self.conn.getresponse()
 
     def close(self):
@@ -279,9 +300,8 @@ def dial(at, secret, timeout=TIMEOUT):
     """A connection to svrngs's address on which svrngs has proved it holds
     `secret` (`proved`), sent nothing else yet. svrngs's port is free while
     svrngs is stopped, and any program on this computer can listen there
-    then, a sandbox of this account's that can't read the token among them;
-    what is sent with the token acts as this person everywhere. Stopped
-    when nothing listens there; else Unreadable, the token sent nowhere,
+    then, a sandbox of this account's that can't read the token among them.
+    Stopped when nothing listens there; else Unreadable, nothing asked,
     until svrngs proves it. An svrngs older than the one its login service
     starts, as one an update replaced keeps running until it restarts, is
     restarted once (`renewal`), then waited for and asked again."""
@@ -317,7 +337,7 @@ def connected_to(at, secret, timeout):
     except OSError as e:
         raise Unreadable(f"svrngs's address did not answer: {e}") from None
     try:
-        return Proven(conn, proved(conn, secret, port), secret, timeout)
+        return Proven(conn, proved(conn, secret, port), timeout)
     except BaseException:
         conn.close()
         raise
@@ -344,8 +364,8 @@ Kept = collections.namedtuple("Kept", "program data version")
 def renewal(port):
     """The service restarted, once, because what answers at svrngs's
     address is an svrngs from before 1.13.3 (Older) and the one its login
-    service starts isn't; or Unreadable, saying why not, the token sent
-    nowhere. An update replaces svrngs's file while svrngs runs on until it
+    service starts isn't; or Unreadable, saying why not, nothing asked.
+    An update replaces svrngs's file while svrngs runs on until it
     restarts (svrngs-bin.install says to run `svrngs restart`). Restarted
     only while an svrngs holds the data dir (`held`), so a program that
     isn't svrngs never restarts it; only for the service that keeps this
@@ -497,8 +517,8 @@ def version(program):
 
 def request(at, secret, method, path, body=None, timeout=TIMEOUT):
     """One request to svrngs's API: its status, and its JSON, or None when
-    it answered something else. Sent only on a connection svrngs proved
-    itself on (`dial`). No Origin is sent: svrngs refuses a request that
+    it answered something else. Asked only on a connection svrngs proved
+    itself on, with that connection's code (`dial`). No Origin is sent: svrngs refuses a request that
     carries one, as coming from a page (api.rs:199-210)."""
     proven = dial(at, secret, timeout)
     headers, payload = {}, None
@@ -923,8 +943,8 @@ def lends_of(at, secret, namespace):
 
 # The first svrngs the panel works with: 1.13.3 carries svrngs's update
 # floor (svrngs update.rs `BUILT`, at 031211d4), Play at a lend's address
-# (svrngs play.rs, at 2fe16c08) and the proof svrngs gives before the
-# helper sends its token (POST /v1/proof, `proved`). An svrngs older than
+# (svrngs play.rs, at 2fe16c08) and the proof and nonce svrngs gives
+# before the helper asks it (POST /v1/proof, `proved`). An svrngs older than
 # that has no such route, and is told NEWER; Get svrngs installs none
 # signed before SIGNED_SINCE.
 NEEDS = "1.13.3"
@@ -1146,7 +1166,7 @@ def connected():
 def lend_at(origin, port):
     """The label of a lend's origin, if it is one of svrngs's own on this
     computer (http://<label>.localhost:<svrngs's port>/), else None. Nothing
-    else is ever sent the token."""
+    else is ever asked with svrngs's code."""
     match = re.fullmatch(r"http://([a-z0-9]{1,100})\.localhost:(\d{1,5})/", origin or "")
     if not match or int(match.group(2)) != port:
         return None

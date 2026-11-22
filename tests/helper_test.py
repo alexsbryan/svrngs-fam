@@ -8,6 +8,7 @@ Each case runs the real helper as the shell does, with an argv list.
 """
 
 import fcntl
+import http.client
 import importlib.machinery
 import importlib.util
 import json
@@ -27,6 +28,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from fake_svrngs import TOKEN, Fake  # noqa: E402
+from fake_svrngs import REFUSED_TOKEN  # noqa: E402
+from fake_svrngs import ask as fake_ask  # noqa: E402
 from fake_svrngs import proof as fake_proof  # noqa: E402
 
 HELPER = HERE.parent / "bin" / "svrngs-fam"
@@ -282,7 +285,9 @@ check("a friend's long name is cut to 200", len(got["groups"][1]["name"]), 200)
 check("a friend's lend is read", got["lends"]["a" * 64]["lent"][0]["name"], "deepseek-flash")
 check("this computer's lend, its port, its groups, and that nothing answers there now", got["mine"],
       [{"name": "garden", "port": quiet, "groups": ["a" * 64], "readable": True, "now": None}])
-check("asked with the token, after each proof", all(s["headers"].get("Authorization") == f"Bearer {TOKEN}" for s in fake.seen if s["path"] != "/v1/proof"), True)
+check("asked with each connection's code, never the token",
+      (all(s["headers"].get("Authorization", "").startswith("Svrngs ") for s in fake.seen if s["path"] != "/v1/proof"),
+       any(TOKEN in v for s in fake.seen for v in s["headers"].values())), (True, False))
 check("never with an Origin", any("Origin" in s["headers"] for s in fake.seen), False)
 fake.close()
 
@@ -354,6 +359,58 @@ check("the helper's proof of each", [helper.proof(*v[:4]) for v in VECTORS], [v[
 check("the stand-in svrngs's, made apart from it", [fake_proof(*v[:4]) for v in VECTORS], [v[4] for v in VECTORS])
 check("an end of a connection named as svrngs names it, by Rust's SocketAddr",
       [helper.end(("127.0.0.1", 50000)), helper.end(("::1", 50001, 0, 0))], ["127.0.0.1:50000", "[::1]:50001"])
+# The code a program asks svrngs with on a connection, for a nonce svrngs
+# gave there, as svrngs 1.13.3 takes it.
+ASKS = (
+    ("test-token", "11" * 32, "127.0.0.1:50000", "127.0.0.1:40000", "12948174292b9641bc74ea49e12918bd39931f81cddef77ae9c04d46e6585245"),
+    ("test-token", "cd" * 32, "[::1]:50001", "[::1]:40000", "d806666da2d6c78fa07dc51fe301f57596fed866e930680a54e5bbc9de104f1c"),
+)
+check("the helper's ask of each", [helper.ask_for(*v[:4]) for v in ASKS], [v[4] for v in ASKS])
+check("the stand-in svrngs's, made apart from it", [fake_ask(*v[:4]) for v in ASKS], [v[4] for v in ASKS])
+
+
+def asking(port, *steps):
+    """What the stand-in svrngs answers to raw requests, each on a
+    connection of its own number: ("prove", n) asks a proof on connection
+    n, keeping its nonce; ("ask", n, how) asks /v1/groups on connection n,
+    with `how(conns, nonces)` as its Authorization. Each step's status,
+    and for an ask, svrngs's words when it refused."""
+    conns, nonces, said = {}, {}, []
+    for step in steps:
+        conn = conns.setdefault(step[1], http.client.HTTPConnection("127.0.0.1", port, timeout=5))
+        if step[0] == "prove":
+            conn.request("POST", "/v1/proof", body=json.dumps({"challenge": "00" * 32}), headers={"Content-Type": "application/json"})
+            reply = conn.getresponse()
+            nonces[step[1]] = json.loads(reply.read()).get("nonce")
+            said.append(reply.status)
+        else:
+            conn.request("GET", "/v1/groups", headers={"Authorization": step[2](conns, nonces)})
+            reply = conn.getresponse()
+            body = json.loads(reply.read())
+            said.append((reply.status, body.get("error")))
+    for conn in conns.values():
+        conn.close()
+    return said
+
+
+def code(n):
+    """The ask made for connection `n`: its nonce and its two ends."""
+    def made(conns, nonces):
+        sock = conns[n].sock
+        return f"Svrngs {fake_ask(TOKEN, nonces[n], helper.end(sock.getsockname()), helper.end(sock.getpeername()))}"
+    return made
+
+
+home = case("the stand-in svrngs, as svrngs: the token itself refused, and only a connection's own code taken")
+fake = Fake()
+said = asking(fake.port, ("prove", 1), ("ask", 1, lambda c, n: f"Bearer {TOKEN}"), ("ask", 1, code(1)),
+              ("prove", 2), ("ask", 2, code(1)), ("ask", 3, code(1)), ("ask", 2, code(2)))
+check("Bearer and the token: refused, saying what to use instead", said[1], (401, REFUSED_TOKEN))
+check("the code for that connection: taken", said[2][0], 200)
+check("another connection's code: refused", said[4][0], 401)
+check("a code on a connection that asked no proof: refused", said[5][0], 401)
+check("each connection's own: taken", said[6][0], 200)
+fake.close()
 
 home = case("svrngs proves it holds the token, then is asked with it on that same connection")
 fake = Fake()
@@ -388,11 +445,11 @@ check("it was asked only for its proof, never with the token",
 fake.close()
 
 # A program at svrngs's address that isn't svrngs and can't read its token.
-# It answers every request as svrngs answers a challenge, by a proof made
-# with a token of its own on that connection's own ends, or, told "404"
-# after its port, as an svrngs before 1.13.3 does. It keeps the connection
-# open for the next, and writes down every request, whole, a line of JSON
-# each.
+# It answers every request as svrngs answers a challenge, with a nonce and
+# a proof made with a token of its own on that connection's own ends, or,
+# told "404" after its port, as an svrngs before 1.13.3 does. It keeps the
+# connection open for the next, and writes down every request, whole, a
+# line of JSON each.
 ANSWER = r"""
 import hashlib, hmac, json, re, socket, sys
 
@@ -429,7 +486,7 @@ def answer(c):
                 challenge = ""
             said = "\n".join(("svrngs proof v1", challenge, named(c.getpeername()), named(c.getsockname())))
             made = hmac.new(b"a token of its own", said.encode(), hashlib.sha256).hexdigest()
-            raw = json.dumps({"proof": made, "groups": [], "lent": [], "open": "http://evil.localhost:1/"}).encode()
+            raw = json.dumps({"proof": made, "nonce": "ab" * 32, "groups": [], "lent": [], "open": "http://evil.localhost:1/"}).encode()
             c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(raw), raw))
     except OSError:
         pass
@@ -506,8 +563,8 @@ def sent_nothing(got, asked, received, out, home):
           {verb: (False, True) for verb in asked})
     check("it was asked for a proof on each connection, and sent nothing more",
           (len(received) >= 5, [r["head"].split("\r\n")[0] for r in received if not r["head"].startswith("POST /v1/proof ")]), (True, []))
-    check("never the token, nor any header to carry one",
-          (TOKEN in out, [r["head"] for r in received if "authorization:" in r["head"].lower()]), (False, []))
+    check("no byte of the token, ever", (TOKEN in out, [r["head"] for r in received if "bearer" in r["head"].lower()]), (False, []))
+    check("nor any code to ask with", [r["head"] for r in received if "authorization:" in r["head"].lower()], [])
     check("nothing was opened in the browser", (home / "browser-argv").exists(), False)
 
 
@@ -819,7 +876,7 @@ try:
         shown = type(e).__name__
 finally:
     helper.json.loads = loads
-check("shown_proof finds no proof in it", shown, "")
+check("shown_proof finds no proof and no nonce in it", shown, ("", ""))
 
 home = case("what runs here, and what is offered")
 fake = Fake()
@@ -1044,8 +1101,8 @@ played = lambda: [(s["headers"].get("Content-Type"), json.loads(s["body"])) for 
 got, said = run(home, "play", FEDORA, "coder")
 check("svrngs is asked to turn Play on for that lend, by its computer's key and its name, and nothing else",
       played(), [("application/json", {"on": {"key": FEDORA, "name": "coder"}})])
-check("as an app on this computer: with the token, never an Origin",
-      [(s["headers"].get("Authorization"), "Origin" in s["headers"]) for s in fake.seen if s["path"] == "/v1/play"], [(f"Bearer {TOKEN}", False)])
+check("as an app on this computer: with that connection's code, never an Origin",
+      [(s["headers"].get("Authorization", "")[:7], "Origin" in s["headers"]) for s in fake.seen if s["path"] == "/v1/play"], [("Svrngs ", False)])
 check("the address svrngs answered is copied, with v1 on its end, as an OpenAI-compatible app takes it",
       (got["ok"], (home / "clipboard").read_text() if (home / "clipboard").exists() else None), (True, f"http://model1.localhost:{fake.port}/v1"))
 check("and said, with the token never in it", (got.get("address"), TOKEN in said), (f"http://model1.localhost:{fake.port}/v1", False))
@@ -1197,8 +1254,8 @@ posted = lambda: [(s["path"], s["headers"].get("Content-Type"), json.loads(s["bo
 got, _ = run(home, "approve", "garden", "--token", LISTED, "--pid", "4242@987654")
 check("svrngs is sent the token the row was listed with, and the process its line named, and nothing else",
       posted(), [("/v1/lends/garden/approve", "application/json", {"token": LISTED, "pid": 4242, "start": 987654})])
-check("as an app on this computer: with the token, never an Origin",
-      [(s["headers"].get("Authorization"), "Origin" in s["headers"]) for s in fake.seen if s["path"] != "/v1/proof"], [(f"Bearer {TOKEN}", False)])
+check("as an app on this computer: with that connection's code, never an Origin",
+      [(s["headers"].get("Authorization", "")[:7], "Origin" in s["headers"]) for s in fake.seen if s["path"] != "/v1/proof"], [("Svrngs ", False)])
 check("svrngs approves it", fake.approved, ["garden"])
 check("what svrngs kept it to is said, as `svrngs approve` says it (cli.rs:1746)", (got["ok"], got["said"]),
       (True, "garden is kept to python3 in ~/garden-app now."))
