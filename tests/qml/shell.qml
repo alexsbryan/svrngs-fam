@@ -408,16 +408,37 @@ ShellRoot {
     }
 
     function afterOpen() {
-      console.log("Keep sharing it: one press, what its line shows, by its row's token")
+      console.log("Keep sharing it: two presses, the second naming the groups, then what its line shows, by its row's token")
       show(kept)
       barPanel.activate("keep:quiet")
-      check("nothing runs where nothing answers", fam.doing, "")
+      check("nothing runs where nothing answers", [fam.doing, barPanel.keeping].join("|"), "|")
       barPanel.activate("keep:untold")
-      check("nor where svrngs listed no token", fam.doing, "")
+      check("nor where svrngs listed no token", [fam.doing, barPanel.keeping].join("|"), "|")
+      var before = JSON.stringify(fam.lastAsked)
       barPanel.activate("keep:garden")
-      check("svrngs is asked to approve what the line shows: its row's token, the process by its pid and start, nothing else",
+      check("the first press approves nothing, and waits", [fam.doing, barPanel.keeping, JSON.stringify(fam.lastAsked) === before].join("|"), "|garden|true")
+      check("its second press, then Cancel, are the next stops",
+            JSON.stringify(barPanel.stops.filter(function(s) { return /^keep(ok|no)?:garden$/.test(s) })), JSON.stringify(["keep:garden", "keepok:garden", "keepno:garden"]))
+      check("it names each group the share goes to, what answers there, and who can open it",
+            JSON.stringify(barPanel.keepWords(barPanel.lent[0])),
+            JSON.stringify(["Keep sharing garden with WorkingGroup?", "Now answering: puma in ~/my-garden. Everyone in WorkingGroup can open it as themselves, while this computer is on."]))
+      barPanel.activate("keepno:garden")
+      check("Cancel approves nothing", [fam.doing, barPanel.keeping, JSON.stringify(fam.lastAsked) === before].join("|"), "||true")
+      barPanel.open()
+      show(kept)
+      var content = panelOf(barPanel)
+      press(content, "keep:garden")
+      var shown = shownTexts(content)
+      check("pressed: the question and what it lets in are drawn, nothing approved",
+            [shown.indexOf("Keep sharing garden with WorkingGroup?") >= 0, fam.doing].join("|"), "true|")
+      var ok = withStop(content, "keepok:garden")
+      check("and its second Keep sharing it says so to a screen reader", ok ? ok.Accessible.description : "no such button",
+            "Now answering: puma in ~/my-garden. Everyone in WorkingGroup can open it as themselves, while this computer is on.")
+      press(content, "keepok:garden")
+      check("the second press: svrngs is asked to approve what the line shows: its row's token, the process by its pid and start, nothing else",
             JSON.stringify(fam.lastAsked), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
-      check("it runs", fam.doing, "keep:garden")
+      check("it runs, and the question closes", [fam.doing, barPanel.keeping].join("|"), "keep:garden|")
+      barPanel.close()
       settle.then = harness.forwarded
       settle.start()
     }

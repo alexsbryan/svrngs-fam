@@ -79,6 +79,9 @@ Panel {
   property var knownPrograms: []
   // The group whose new invite link waits for its second press.
   property string inviting: ""
+  // The lend of yours whose Keep sharing it waits for its second press, by
+  // its name: which groups it goes to, and what answers there, said first.
+  property string keeping: ""
   // Get svrngs waiting for its second press, and the invite link given, if any.
   property bool getting: false
   property string getLink: ""
@@ -105,7 +108,11 @@ Panel {
       return []
     }
     if (!finding) {
-      lent.forEach(function(l) { out.push("stop:" + l.name); if (Model.keepable(l)) out.push("keep:" + l.name) })
+      lent.forEach(function(l) {
+        out.push("stop:" + l.name)
+        if (Model.keepable(l)) out.push("keep:" + l.name)
+        if (Model.keepable(l) && keeping === l.name) out.push("keepok:" + l.name, "keepno:" + l.name)
+      })
       offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
       if (lending) out = out.concat(groups.length > 1 ? ["lend:group"] : [], ["lend:confirm", "lend:cancel"])
     }
@@ -152,7 +159,7 @@ Panel {
     }
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; getNameEdited = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; keeping = ""; getting = false; getNameEdited = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
   onQueryChanged: cursor = 0
 
   function expanded(id) {
@@ -184,6 +191,8 @@ Panel {
     else if (stop === "get:cancel") getting = false
     else if (kind === "stop") root.stop(rest)
     else if (kind === "keep") keep(lent.filter(function(l) { return l.name === rest })[0])
+    else if (kind === "keepok") keepSharing(lent.filter(function(l) { return l.name === rest })[0])
+    else if (kind === "keepno") keeping = ""
     else if (stop === "lend:confirm") lend()
     else if (stop === "lend:cancel") lending = null
     else if (stop === "lend:group") nextLendGroup()
@@ -199,7 +208,7 @@ Panel {
     else if (kind === "group") { toggleGroup(rest); cursorTo(stop) }
     else if (stop === "invite:confirm") invite(inviting)
     else if (stop === "invite:cancel") inviting = ""
-    else if (kind === "invite") { lending = null; turningOn = ""; inviting = rest; cursorTo("invite:confirm") }
+    else if (kind === "invite") { lending = null; turningOn = ""; keeping = ""; inviting = rest; cursorTo("invite:confirm") }
     else if (kind === "home") openLend("")
     else if (kind === "open") openLend(rest)
   }
@@ -213,6 +222,7 @@ Panel {
   function askLend(offer) {
     inviting = ""
     turningOn = ""
+    keeping = ""
     lending = offer
     lendName = offer.name
     nameEdited = false
@@ -257,10 +267,30 @@ Panel {
 
   function stop(name) { fam.act("stop:" + name, ["unshare", name]) }
 
-  // Keep sharing a held lend, to what its line shows answering: the process
-  // svrngs read for its row, sent with the token the row was listed with.
+  // Keep sharing it, the first press: nothing approved yet; which groups
+  // the share goes to, and what answers on its port, said under its line.
   function keep(l) {
-    if (Model.keepable(l)) fam.act("keep:" + l.name, Model.approveArgs(l))
+    if (!Model.keepable(l)) return
+    lending = null
+    inviting = ""
+    turningOn = ""
+    keeping = l.name
+    cursorTo("keepok:" + l.name)
+  }
+
+  // The second press: the held lend kept sharing to what its line shows
+  // answering, the process svrngs read for its row, sent with the token the
+  // row was listed with (svrngs share.rs `approve`), for every group it
+  // goes to.
+  function keepSharing(l) {
+    if (Model.keepable(l) && keeping === l.name && fam.act("keep:" + l.name, Model.approveArgs(l))) keeping = ""
+  }
+
+  // What Keep sharing it's second press says: [the question, what it lets
+  // in], naming each group the share goes to.
+  function keepWords(l) {
+    var to = l.groups.length > 0 ? l.groups.join(", ") : strings.t("keep.nobody")
+    return [strings.t("keep.question").arg(l.name).arg(to), strings.t("keep.meaning").arg(l.now ? l.now.said : "").arg(to)]
   }
 
   // A lend of yours, in a word: that svrngs doesn't list it, so lends it to
@@ -304,6 +334,7 @@ Panel {
     if (Model.copyStep(fam.answer, model) === "copy") { fam.act("copy:" + model.label, Model.copyArgs(model)); return }
     lending = null
     inviting = ""
+    keeping = ""
     turningOn = model.label
     cursorTo("play:confirm")
   }
@@ -678,11 +709,31 @@ Panel {
                   text: root.nowWords(lentLine.modelData)
                 }
                 Act {
-                  visible: Model.keepable(lentLine.modelData)
+                  visible: Model.keepable(lentLine.modelData) && root.keeping !== lentLine.modelData.name
                   doing: "keep:" + lentLine.modelData.name
                   stop: doing
                   words: strings.t("action.keep")
                   onClicked: root.keep(lentLine.modelData)
+                }
+                // The second press: which groups it goes to, and that
+                // everyone in them can open what answers there now.
+                Column {
+                  visible: Model.keepable(lentLine.modelData) && root.keeping === lentLine.modelData.name
+                  width: parent.width
+                  spacing: Style.space(6)
+                  Words { text: root.keepWords(lentLine.modelData)[0]; font.bold: true }
+                  Note { id: keepMeaning; text: root.keepWords(lentLine.modelData)[1] }
+                  Row {
+                    spacing: Style.space(8)
+                    Act {
+                      doing: "keep:" + lentLine.modelData.name
+                      stop: "keepok:" + lentLine.modelData.name
+                      words: strings.t("action.keep")
+                      Accessible.description: keepMeaning.text
+                      onClicked: root.keepSharing(lentLine.modelData)
+                    }
+                    Act { words: strings.t("action.cancel"); stop: "keepno:" + lentLine.modelData.name; onClicked: root.keeping = "" }
+                  }
                 }
               }
             }
@@ -940,7 +991,7 @@ Panel {
                       doing: "invite:" + groupColumn.modelData.id
                       words: strings.t("action.invite")
                       stop: doing
-                      onClicked: { root.lending = null; root.turningOn = ""; root.inviting = groupColumn.modelData.id }
+                      onClicked: { root.lending = null; root.turningOn = ""; root.keeping = ""; root.inviting = groupColumn.modelData.id }
                     }
                     Act {
                       doing: "open:"
