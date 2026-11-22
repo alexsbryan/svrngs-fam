@@ -6,8 +6,7 @@ refuses any request carrying `Origin` or `Sec-Fetch-Site`, as svrngs does (svrng
 api.rs:199-210), and keeps each connection open for the next request, as
 svrngs does over HTTP/1.1. `mode` makes it answer the ways svrngs can go wrong:
 "closes" closes each connection once it has proved itself on it, and "old" is
-an svrngs from before approving, which has neither 1.13.3's proof route nor an
-approve route (surface.rs `router` at v1.12.2).
+an svrngs from before 1.13.3, which has no proof route.
 """
 
 import hashlib
@@ -171,9 +170,9 @@ class Fake:
                     label = asked.get("lend") or "svrngs"
                     return self.answer(200, {"open": f"http://{label}.localhost:{fake.port}/svrngs-open?code=one-time-secret"})
                 named = re.fullmatch(r"/v1/lends/([^/?]+)/approve", self.path)
-                if named and fake.mode != "old":
+                if named:
                     return self.approve(named.group(1), body)
-                if self.path == "/v1/play" and fake.mode != "old":
+                if self.path == "/v1/play":
                     return self.play(body)
                 # axum's own answer to a route it doesn't have: 404, no body.
                 return self.answer(404, b"", "text/plain")
@@ -217,8 +216,7 @@ class Fake:
             def play(self, body):
                 """svrngs play.rs `turn`: `{"on"|"off": {"key", "name"}}`,
                 answered by what has Play on then; a lend not lent to this
-                computer refused 409, in 1.13.3's words, or with mode
-                "port-play" in 1.13.2's, whose Play turned on ports alone."""
+                computer refused 409, in 1.13.3's words."""
                 try:
                     (turn, lend), = json.loads(body).items()
                     key, name = lend["key"], lend["name"]
@@ -227,9 +225,8 @@ class Fake:
                 if turn == "off":
                     fake.playing = [p for p in fake.playing if p != (key, name)]
                     return self.answer(200, fake.plays())
-                if fake.mode == "port-play" or (key, name) not in fake.playable:
-                    how = " as a port" if fake.mode == "port-play" else ""
-                    return self.answer(409, {"error": f"{name} is not lent to this computer{how} now"})
+                if (key, name) not in fake.playable:
+                    return self.answer(409, {"error": f"{name} is not lent to this computer now"})
                 if (key, name) not in fake.playing:
                     fake.playing.append((key, name))
                 return self.answer(200, fake.plays())

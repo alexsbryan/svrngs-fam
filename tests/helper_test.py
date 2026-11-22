@@ -879,13 +879,6 @@ for args in (("notakey", "coder"), (FEDORA, "co der"), (FEDORA,), ()):
     got, _ = run(home, "play", *args)
     check(f"play {' '.join(args)[:24]!r}: refused, svrngs not asked", (got["ok"], len(played()) - asked), (False, 0))
 fake.close()
-for mode in ("port-play", "old"):
-    fake = Fake(mode)
-    fake.playable = {(FEDORA, "coder"): "model1"}
-    data_dir(home, port=fake.port)
-    got, _ = run(home, "play", FEDORA, "coder")
-    check(f"an svrngs whose Play opens no lend at an address ({mode}): what to do", (got["ok"], got["said"]), (False, NEWER))
-    fake.close()
 
 home = case("open: in the browser, signed in")
 fake = Fake()
@@ -1041,11 +1034,6 @@ for args in (["garden"], ["garden", "--pid", "4242@987654"],
     asked = len(posted())
     got, _ = run(home, "approve", *args)
     check(f"approve {' '.join(args)}: refused, svrngs not asked", (got["ok"], len(posted()) - asked), (False, 0))
-fake.close()
-fake = Fake("old")
-data_dir(home, port=fake.port)
-got, _ = run(home, "approve", "garden", "--token", LISTED, "--pid", "4242@987654")
-check("an svrngs from before approving, with no such route: what to do", (got["ok"], got["said"]), (False, NEWER))
 fake.close()
 data_dir(home, port=closed_port())
 got, _ = run(home, "approve", "garden", "--token", LISTED, "--pid", "4242@987654")

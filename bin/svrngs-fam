@@ -839,8 +839,8 @@ def play(key, name, off):
     Turned on, the address svrngs answers is copied with v1 on its end, as
     an OpenAI-compatible app takes it, only if it is open there and that
     address is the lend's own on this computer (`lend_at`). An svrngs whose
-    Play opens no lend at an address, 1.13.2 and before, is told to update
-    (NEWER)."""
+    Play opens no lend at an address, 1.13.2 and before, has no proof route
+    either, and is told to update (NEWER) before it is asked (`proved`)."""
     held, refused = connected()
     if refused:
         return refused
@@ -852,11 +852,6 @@ def play(key, name, off):
     except Unreadable as e:
         return {"ok": False, "said": str(e)}
     said = answer.get("error") if isinstance(answer, dict) else None
-    # Before 1.13.3, Play turned on ports alone (play.rs `turn` at v1.13.2:
-    # "… is not lent to this computer as a port now"), and before 1.13.0
-    # there was no such route: axum's own 404, with no words.
-    if status in (404, 405) and not isinstance(said, str) or isinstance(said, str) and "as a port now" in said:
-        return {"ok": False, "said": NEWER}
     if status != 200 or not isinstance(answer, list):
         return {"ok": False, "said": text(said).strip() if isinstance(said, str) and said.strip() else f"svrngs answered {status} and turned nothing"}
     row = next((p for p in answer if isinstance(p, dict) and p.get("key") == key and p.get("name") == name), None)
@@ -903,10 +898,6 @@ def keep_sharing(name, shown, process):
     said = answer.get("error") if isinstance(answer, dict) else None
     if status == 200 and isinstance(answer, dict):
         return {"ok": True, "said": f"{name} is kept to {answered(answer.get('answers'))} now."}
-    # An svrngs from before approving has no such route: axum's own 404,
-    # with no words (surface.rs `router` at v1.12.2 has none).
-    if status in (404, 405) and not isinstance(said, str):
-        return {"ok": False, "said": NEWER}
     if isinstance(said, str) and said.strip():
         return {"ok": False, "said": said.strip()[:1000]}
     return {"ok": False, "said": f"svrngs answered {status} and kept nothing"}
