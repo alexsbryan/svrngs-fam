@@ -69,6 +69,6 @@
   "groups.empty": "Nobody here shares anything yet.",
   "action.home": "Home page",
   "action.get": "Get svrngs",
-  "get.meaning": "This downloads svrngs and its installer from svrngs's latest release, checks both against the svrngs release key, and installs svrngs for you alone, with no password. Then your browser opens your home page, where you start a group, or join the one your link is for.",
+  "get.meaning": "This downloads svrngs and its installer from svrngs's latest release, checks both against the svrngs release key, and installs svrngs for you alone, with no password. It puts svrngs in ~/.local/bin, runs it as your user service whenever you log in, adds it to your applications menu, and adds ~/.local/bin to your shell's startup file if your terminal doesn't look there yet. Then your browser opens your home page, where you start a group, or join the one your link is for.",
   "get.link": "Invite link, if a friend sent you one"
 }

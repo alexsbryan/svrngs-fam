@@ -7,8 +7,8 @@ Your [svrngs](https://github.com/alexsbryan/svrngs) groups, in the Omarchy bar.
 Lend the app you're running, use your friends' models, and open what your
 groups share, from one icon.
 
-Nothing is lent until you say yes twice, and a share svrngs closes stays
-closed until you keep it to a program of yours. Your svrngs key stays on your
+Nothing is lent until you say yes twice, and a share reaches only the
+program you approved: svrngs refuses anything else that answers on its port. Your svrngs key stays on your
 computer. While its panel is closed, the plugin reads svrngs only when the
 bar starts and each time svrngs starts. If svrngs was updated but the old
 one is still running, the plugin restarts it once to use the new one.
@@ -27,8 +27,11 @@ Click the people icon in your bar. If svrngs isn't on your computer yet,
 press Get svrngs. If a friend sent you an invite link, paste it first. The
 plugin downloads svrngs and its installer from svrngs's latest release,
 checks both against the svrngs release key, and installs svrngs for you
-alone, with no password. The invite link is used only to join your
-friend's group. Your browser then opens your home page, where you start a
+alone, with no password. It puts svrngs in `~/.local/bin`, runs it as your
+user service (`systemctl --user`) whenever you log in, adds it to your
+applications menu, and adds `~/.local/bin` to your shell's startup file if
+your terminal doesn't look there yet. The invite link is used only to join
+your friend's group. Your browser then opens your home page, where you start a
 group or join theirs.
 
 svrngs then takes its updates from svrngs's own page,
