@@ -43,6 +43,7 @@ the one fact no route gives: which port each lend serves.
 """
 
 import calendar
+import collections
 import hashlib
 import hmac
 import http.client
@@ -199,7 +200,9 @@ def shown_proof(raw):
     when it holds none in that shape."""
     try:
         said = json.loads(raw) if len(raw) <= MAX_PROOF else None
-    except ValueError:
+    # Whatever reading it raises: a ValueError for what isn't JSON, and a
+    # RecursionError for nesting deeper than this Python's stack goes.
+    except Exception:
         return ""
     shown = said.get("proof") if isinstance(said, dict) else None
     return shown if isinstance(shown, str) and PROVED.fullmatch(shown) else ""
@@ -208,7 +211,7 @@ def shown_proof(raw):
 def other(port):
     """What the panel says when what answers at svrngs's address doesn't
     prove it holds the token."""
-    return (f"something other than your svrngs answers at svrngs's address, port {port}, so the panel sent it nothing. "
+    return (f"something other than your svrngs answers at svrngs's address, port {port}, so the panel sent it none of your token. "
             "svrngs can't start there until that program stops")
 
 
@@ -233,10 +236,10 @@ def proved(conn, secret, port):
         raw = reply.read(MAX_PROOF + 1)
     except TimeoutError:
         raise Unreadable(f"what listens at svrngs's address, port {port}, didn't show it is your svrngs within "
-                         f"{PROOF_WITHIN:.0f} seconds, so the panel sent it nothing. If svrngs is starting, try again in a moment") from None
+                         f"{PROOF_WITHIN:.0f} seconds, so the panel sent it none of your token. If svrngs is starting, try again in a moment") from None
     except (OSError, http.client.HTTPException):
         raise Unreadable(f"what listens at svrngs's address, port {port}, closed the connection before it showed it is your svrngs, "
-                         "so the panel sent it nothing") from None
+                         "so the panel sent it none of your token") from None
     if reply.status == 404:
         raise Older()
     if reply.status != 200 or not hmac.compare_digest(shown_proof(raw), proof(secret, challenge, client, server)):
@@ -244,7 +247,7 @@ def proved(conn, secret, port):
     # The answer read whole, and the connection still open: one whose
     # answer said to close it, http.client has closed (`getresponse`).
     if conn.sock is not sock or not reply.isclosed():
-        raise Unreadable(f"svrngs closed the connection it proved itself on, at port {port}, so the panel sent it nothing. "
+        raise Unreadable(f"svrngs closed the connection it proved itself on, at port {port}, so the panel sent it none of your token. "
                          "Try again in a moment")
     return sock
 
@@ -279,14 +282,13 @@ def dial(at, secret, timeout=TIMEOUT):
     then, a sandbox of this account's that can't read the token among them;
     what is sent with the token acts as this person everywhere. Stopped
     when nothing listens there; else Unreadable, the token sent nowhere,
-    until svrngs proves it. An svrngs older than the one installed, as one
-    an update replaced keeps running until it restarts, is restarted once
-    (`renewed`), then waited for and asked again."""
+    until svrngs proves it. An svrngs older than the one its login service
+    starts, as one an update replaced keeps running until it restarts, is
+    restarted once (`renewal`), then waited for and asked again."""
     try:
         return connected_to(at, secret, timeout)
     except Older:
-        if not renewed():
-            raise
+        kept = renewal(at[1])
     began = time.monotonic()
     while True:
         try:
@@ -298,8 +300,7 @@ def dial(at, secret, timeout=TIMEOUT):
             time.sleep(0.1)
             continue
         except Older:
-            raise Unreadable(f"svrngs was updated and restarted, but what answers at svrngs's address, port {at[1]}, still isn't "
-                             "the new svrngs, so the panel sent it nothing. svrngs can't start there until that program stops") from None
+            raise Unreadable(still_older(kept, at[1])) from None
         RESTART["proven"] = True
         return proven
 
@@ -322,32 +323,159 @@ def connected_to(at, secret, timeout):
         raise
 
 
-# Whether this run of the helper, one action of the panel's, has restarted
-# svrngs, which it does at most once, and been proved to after it. Held
-# under RESTARTING, since a read asks svrngs from several threads at once.
+# Whether this run of the helper, one read or action of the panel's, has
+# tried to restart svrngs, and been proved to after it. Held under
+# RESTARTING, since a read asks svrngs from several threads at once. A
+# restart is remembered across runs too (`stamped`): the panel runs the
+# helper again each time svrngs rewrites its `api` file, which it does at
+# every start.
 RESTART = {"tried": False, "proven": False}
 RESTARTING = threading.Lock()
 RESTARTED = "svrngs was updated, so it restarted to use the new one."
 
+# svrngs's login service as systemd keeps it: `svrngs restart` restarts
+# svrngs.service (svrngs cli.rs `restart`), whose unit is svrngs-bin's
+# (/usr/lib/systemd/user/svrngs.service) or svrngs's install line's
+# (~/.config/systemd/user/svrngs.service, which keeps the data dir it was
+# given as SVRNGS_DIR; svrngs web/install.sh).
+Kept = collections.namedtuple("Kept", "program data version")
 
-def renewed():
-    """Whether svrngs was restarted just now, as `svrngs restart` restarts
-    it (`run_svrngs`), because what answers at its address is older than
-    NEEDS and the svrngs installed here isn't (`installed`). An update
-    replaces svrngs's file while svrngs runs on, until it restarts (pacman's
-    svrngs-bin.install says to run `svrngs restart`). Not again in this run:
-    False once it was tried, as when the installed svrngs is older too, or
-    says no version. Unreadable when the restart was refused."""
+
+def renewal(port):
+    """The service restarted, once, because what answers at svrngs's
+    address is an svrngs from before 1.13.3 (Older) and the one its login
+    service starts isn't; or Unreadable, saying why not, the token sent
+    nowhere. An update replaces svrngs's file while svrngs runs on until it
+    restarts (svrngs-bin.install says to run `svrngs restart`). Restarted
+    only while an svrngs holds the data dir (`held`), so a program that
+    isn't svrngs never restarts it; only for the service that keeps this
+    data dir; only when the program it starts is NEEDS or later; and once
+    for that program and version (`stamped`)."""
+    root = data_dir()
+    if not held(root / "lock"):
+        raise Unreadable(other(port))
     with RESTARTING:
         if RESTART["tried"]:
-            return False
+            raise Older()
         RESTART["tried"] = True
-        version = installed()
-        if version is None or version < FLOOR:
-            return False
-        done = run_svrngs(["restart"])
-    if not done["ok"]:
-        raise Unreadable(f"the svrngs answering is older than the one installed here, and it couldn't be restarted: {done['said']}")
+        kept = service()
+        if kept is None or kept.data != os.path.realpath(root):
+            raise Older()
+        if kept.version is None or kept.version < FLOOR:
+            raise Unreadable(f"This needs svrngs {NEEDS} or later. Your login service starts {kept.program}, {is_version(kept)}: "
+                             "update it on its home page, then try again.")
+        first = stamped(kept)
+        if first is None:
+            raise Unreadable(f"The svrngs running here is older than {kept.program} ({version_of(kept)}). "
+                             "Restart it to use that one: svrngs restart")
+        if not first:
+            raise Unreadable(still_older(kept, port))
+        try:
+            done = subprocess.run([kept.program, "restart"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            done = subprocess.CompletedProcess([], 1, "", str(e))
+    if done.returncode != 0:
+        said = text(done.stderr.strip().splitlines()[0] if done.stderr.strip() else f"it stopped (exit {done.returncode})")
+        raise Unreadable(f"The svrngs running here is older than {kept.program} ({version_of(kept)}), and restarting it didn't work: "
+                         f"{said.rstrip('.')}. See why with: systemctl --user status svrngs")
+    return kept
+
+
+def still_older(kept, port):
+    """What the panel says when svrngs restarted, for `kept`, and what
+    answers is still from before 1.13.3."""
+    return (f"svrngs was restarted to use {kept.program} ({version_of(kept)}), but the svrngs answering at port {port} is still older, "
+            "so the panel sent it none of your token. See why with: systemctl --user status svrngs")
+
+
+def version_of(kept):
+    return ".".join(str(n) for n in kept.version) if kept.version else "no version"
+
+
+def is_version(kept):
+    return f"which is {version_of(kept)}" if kept.version else "which says no version this panel can read"
+
+
+def held(lock):
+    """Whether a process holds `lock`, svrngs's data-dir lock, as svrngs
+    holds it while it runs (svrngs cli.rs `claim`: File::try_lock, a flock
+    on Linux). Read from /proc/locks, never by taking it, which would make
+    an svrngs starting just then refuse the data dir as held: a FLOCK on its
+    inode by a process that has that very file open. /proc/locks names the
+    file by its filesystem's device, which btrfs numbers apart from what
+    stat says, so it is matched by its inode, then by that process's open
+    files (proc(5))."""
+    try:
+        want = os.stat(lock)
+        rows = Path("/proc/locks").read_text().splitlines()
+    except OSError:
+        return False
+    for row in rows:
+        # "74: FLOCK  ADVISORY  WRITE 1762 00:26:81292995 0 EOF"; a waiting
+        # one reads "74: -> FLOCK …".
+        f = row.split()
+        if len(f) > 5 and f[1] == "FLOCK" and f[4].isdigit() and f[5].rpartition(":")[2] == str(want.st_ino):
+            if opens(int(f[4]), want):
+                return True
+    return False
+
+
+def opens(pid, want):
+    """Whether process `pid` has the file `want` (a stat) open."""
+    try:
+        fds = os.scandir(f"/proc/{pid}/fd")
+    except OSError:
+        return False
+    with fds:
+        for fd in fds:
+            try:
+                s = os.stat(fd.path)
+            except OSError:
+                continue
+            if (s.st_dev, s.st_ino) == (want.st_dev, want.st_ino):
+                return True
+    return False
+
+
+def service():
+    """svrngs's login service, as `systemctl --user show` says it: the
+    program its ExecStart runs, the data dir it keeps (its SVRNGS_DIR, else
+    ~/.svrngs, as svrngs takes it), and that program's version (`version`).
+    None when systemd keeps no such service here."""
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return None
+    try:
+        done = subprocess.run([systemctl, "--user", "show", "svrngs.service", "--property=LoadState,ExecStart,Environment"],
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    said = dict(line.partition("=")[::2] for line in done.stdout.splitlines())
+    program = re.match(r"\{ path=(/\S+) ;", said.get("ExecStart", ""))
+    if done.returncode != 0 or said.get("LoadState") != "loaded" or program is None:
+        return None
+    named = re.search(r"(?:^| )SVRNGS_DIR=(/\S+)", said.get("Environment", ""))
+    data = named.group(1) if named else str(Path.home() / ".svrngs")
+    return Kept(program.group(1), os.path.realpath(data), version(program.group(1)))
+
+
+def stamped(kept):
+    """Whether this is the first restart for `kept`: its program, at its
+    version, for its data dir. A file for it, made in this person's runtime
+    directory, which a logout clears; True only for the run that made it.
+    None when there is no such directory to remember it in."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime or not Path(runtime).is_dir() or Path(runtime).stat().st_uid != os.getuid():
+        return None
+    folder = Path(runtime) / "svrngs-fam"
+    try:
+        folder.mkdir(mode=0o700, exist_ok=True)
+        name = hashlib.sha256(f"{kept.data}\n{kept.program}\n{version_of(kept)}".encode()).hexdigest()[:32]
+        os.close(os.open(folder / f"restarted-{name}", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except FileExistsError:
+        return False
+    except OSError:
+        return None
     return True
 
 
@@ -356,14 +484,11 @@ def renewed():
 VERSION = re.compile(r"svrngs (\d{1,5})\.(\d{1,5})\.(\d{1,5})(?: \([0-9a-f]{1,64}\))?")
 
 
-def installed():
-    """The version of the svrngs this helper runs (`svrngs_command`), as
-    (major, minor, patch), or None when there is none or it says none."""
-    command = svrngs_command()
-    if command is None:
-        return None
+def version(program):
+    """The version svrngs's program `program` says, as (major, minor,
+    patch), or None when it says none."""
     try:
-        done = subprocess.run([command, "version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+        done = subprocess.run([program, "version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     said = VERSION.fullmatch(done.stdout.strip()) if done.returncode == 0 else None
@@ -1396,7 +1521,7 @@ def process_of(rest):
 def main(argv):
     """The helper's one JSON answer to `argv`: a flag with no value after it
     is refused, as any argument it can't take is. When this run restarted
-    svrngs and svrngs then proved itself (`renewed`), `restarted` says so,
+    svrngs and svrngs then proved itself (`renewal`), `restarted` says so,
     for the panel to show."""
     try:
         said = answer(argv)

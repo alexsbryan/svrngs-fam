@@ -7,6 +7,7 @@ A failure that is not a refused connection must be "unreadable", never
 Each case runs the real helper as the shell does, with an argv list.
 """
 
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
@@ -122,6 +123,19 @@ esac
 STUBS = {
     "omarchy-launch-browser": '#!/bin/bash\nprintf "%s\\n" "$@" > "$HOME/browser-argv"\n',
     "wl-copy": '#!/bin/bash\ncat > "$HOME/clipboard"\n',
+    # systemctl, as the helper asks it what svrngs's login service starts:
+    # $HOME/service holds its program, then its SVRNGS_DIR, a line each;
+    # without them, the stand-in svrngs command and none. With
+    # $HOME/no-service, systemd keeps no such service.
+    "systemctl": r"""#!/bin/bash
+[ "$*" = "--user show svrngs.service --property=LoadState,ExecStart,Environment" ] || exit 1
+if [ -e "$HOME/no-service" ]; then printf 'LoadState=not-found\nExecStart=\nEnvironment=\n'; exit 0; fi
+program=$(sed -n 1p "$HOME/service" 2>/dev/null); dir=$(sed -n 2p "$HOME/service" 2>/dev/null)
+program=${program:-$HOME/.local/bin/svrngs}
+echo "LoadState=loaded"
+echo "ExecStart={ path=$program ; argv[]=$program ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+echo "Environment=${dir:+SVRNGS_DIR=$dir }PATH=/usr/bin:/bin"
+""",
 }
 
 
@@ -368,7 +382,7 @@ fake = Fake("closes")
 data_dir(home, port=fake.port)
 got = state(home)
 check("unreadable, saying so", (got["svrngs"], "closed the connection it proved itself on" in got.get("reason", ""),
-                                "sent it nothing" in got.get("reason", "")), ("unreadable", True, True))
+                                "none of your token" in got.get("reason", "")), ("unreadable", True, True))
 check("it was asked only for its proof, never with the token",
       ([s["path"] for s in fake.seen], any("Authorization" in s["headers"] for s in fake.seen)), (["/v1/proof"], False))
 fake.close()
@@ -376,7 +390,7 @@ fake.close()
 # A program at svrngs's address that isn't svrngs and can't read its token.
 # It answers every request as svrngs answers a challenge, by a proof made
 # with a token of its own on that connection's own ends, or, told "404"
-# after its port, as an svrngs before 1.13.3 does; keeps the connection
+# after its port, as an svrngs before 1.13.3 does. It keeps the connection
 # open for the next, and writes down every request, whole, a line of JSON
 # each.
 ANSWER = r"""
@@ -485,10 +499,10 @@ def squatted(home, squat, port, installed=True, also=()):
 
 def sent_nothing(got, asked, received, out, home):
     check("its read is unreadable, saying something other than your svrngs answers and that it was sent nothing",
-          (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")),
+          (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "none of your token" in got.get("reason", "")),
           ("unreadable", True, True))
     check("approve, open, models and play each refuse, saying so",
-          {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
+          {verb: (a["ok"], "none of your token" in a.get("said", "")) for verb, a in asked.items()},
           {verb: (False, True) for verb in asked})
     check("it was asked for a proof on each connection, and sent nothing more",
           (len(received) >= 5, [r["head"].split("\r\n")[0] for r in received if not r["head"].startswith("POST /v1/proof ")]), (True, []))
@@ -606,7 +620,7 @@ try:
 finally:
     relay.close()
 check("unreadable, saying something other than your svrngs answers and that it was sent nothing",
-      (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")),
+      (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "none of your token" in got.get("reason", "")),
       ("unreadable", True, True))
 check("svrngs was asked for its proof through the relay, and proved it with its token, on the relay's connection",
       [s["path"] for s in fake.seen], ["/v1/proof"])
@@ -646,50 +660,124 @@ def restarts(home):
     return lines(home / "restarts")
 
 
-for version in ("1.13.2", "1.13"):
-    home = case(f"an svrngs from before 1.13.3, with no proof route, and the one installed says {version}: what to do, nothing restarted, nothing sent")
-    fake = Fake("old")
-    data_dir(home, port=fake.port)
-    (home / "installed-version").write_text(version)
+def holding(data):
+    """svrngs's data-dir lock, held as a running svrngs holds it (svrngs
+    cli.rs `claim`: File::try_lock, a flock on Linux), until closed."""
+    held = open(data / "lock", "w")
+    fcntl.flock(held, fcntl.LOCK_EX)
+    return held
+
+
+def older_answers(home, fake):
+    """What the helper read, and what each action said, of an svrngs from
+    before 1.13.3 holding its data dir."""
     got = state(home, "--full")
-    asked = {verb: run(home, *args)[0] for verb, args in ACTIONS}
+    return got, {verb: run(home, *args)[0] for verb, args in ACTIONS}
+
+
+def sent_none(fake):
+    check("it was asked only for its proof, never with the token",
+          ({s["path"] for s in fake.seen}, any("Authorization" in s["headers"] for s in fake.seen)), ({"/v1/proof"}, False))
+
+
+# An svrngs from before 1.13.3 holding its data dir, while its login
+# service starts an svrngs that is older too, or says no version: told so,
+# by that program, and never restarted. PATH's svrngs says 1.13.3 in the
+# last: install.sh's ~/.local/bin/svrngs kept by its own unit beside a
+# package's newer one.
+OLDER_COPY = "#!/bin/bash\ncase \"$1\" in\n  version) echo 'svrngs 1.13.2 (0123abcd)' ;;\n  restart) echo restart >> \"$HOME/restarts\" ;;\nesac\n"
+for version, starts, said in (("1.13.2", None, "which is 1.13.2"), ("1.13", None, "which says no version this panel can read"),
+                              ("1.13.3", "older-svrngs", "which is 1.13.2")):
+    home = case(f"an svrngs from before 1.13.3 holding its data dir, its login service starting {starts or 'the svrngs command'}, "
+                f"which says {version if not starts else '1.13.2'}: what to do, by that program, and nothing restarted")
+    fake = Fake("old")
+    data = data_dir(home, port=fake.port)
+    (home / "installed-version").write_text(version)
+    program = home / ".local/bin/svrngs"
+    if starts:
+        program = home / starts
+        program.write_text(OLDER_COPY)
+        program.chmod(0o755)
+        (home / "service").write_text(f"{program}\n")
+    held = holding(data)
+    got, asked = older_answers(home, fake)
+    held.close()
+    words = f"This needs svrngs 1.13.3 or later. Your login service starts {program}, {said}: update it on its home page, then try again."
+    check("its read says what to do, naming what the service starts", (got["svrngs"], got.get("reason")), ("unreadable", words))
+    check("and approve, open, models and play each say it", {verb: a.get("said") for verb, a in asked.items()}, {verb: words for verb in asked})
+    check("never restarted", restarts(home), [])
+    sent_none(fake)
+    fake.close()
+
+for why, setup in (("systemd keeps no svrngs service here", lambda home: (home / "no-service").touch()),
+                   ("its login service keeps another data dir", lambda home: (home / "service").write_text(f"{home}/.local/bin/svrngs\n/elsewhere\n"))):
+    home = case(f"an svrngs from before 1.13.3 holding its data dir, where {why}: what to do, and nothing restarted")
+    fake = Fake("old")
+    data = data_dir(home, port=fake.port)
+    (home / "installed-version").write_text("1.13.3")
+    setup(home)
+    held = holding(data)
+    got, asked = older_answers(home, fake)
+    held.close()
     check("its read says what to do", (got["svrngs"], got.get("reason")), ("unreadable", NEWER))
     check("and approve, open, models and play each say it", {verb: (a["ok"], a.get("said")) for verb, a in asked.items()},
           {verb: (False, NEWER) for verb in asked})
-    check("the installed svrngs was asked its version, and never restarted",
-          ("version" in lines(home / "svrngs-calls"), restarts(home)), (True, []))
-    check("it was asked only for its proof, never with the token",
-          ({s["path"] for s in fake.seen}, any("Authorization" in s["headers"] for s in fake.seen)), ({"/v1/proof"}, False))
+    check("never restarted", restarts(home), [])
+    sent_none(fake)
     fake.close()
 
-home = case("an svrngs an update replaced, still running: restarted once, as svrngs restart does, then proved, then asked")
+home = case("an svrngs an update replaced, still running and holding its data dir: restarted once, then proved, then asked")
 fake = Fake("old")
-data_dir(home, port=fake.port)
+data = data_dir(home, port=fake.port)
 (home / "installed-version").write_text("1.13.3")
 (home / "stops").touch()
 fake.renew(home / "restarts", home / "stopped")
+held = holding(data)
 got = state(home, "--full")
 check("running, saying svrngs restarted to use the new one", (got["svrngs"], got.get("restarted")), ("running", RESTARTED))
-check("restarted once", restarts(home), ["restart"])
+check("restarted once, by the program its login service starts", (restarts(home), "version" in lines(home / "svrngs-calls")), (["restart"], True))
 old, *new = fake.seen
 check("the old svrngs was asked only for its proof; the new one proved itself on each connection before the token went on it",
       (old["path"], "Authorization" in old["headers"], sorted({tuple(p == "/v1/proof" for p in paths) for paths in ends(new).values()})),
       ("/v1/proof", False, [(True, False)]))
 got, _ = run(home, "open")
 check("an action after it restarts nothing, and says nothing of it", (got["ok"], "restarted" in got, restarts(home)), (True, False, ["restart"]))
+held.close()
 fake.close()
 
 home = case("an action that finds svrngs replaced by an update: restarted once, then done, saying so")
 fake = Fake("old")
-data_dir(home, port=fake.port)
+data = data_dir(home, port=fake.port)
 (home / "installed-version").write_text("1.13.3")
 (home / "stops").touch()
 fake.renew(home / "restarts", home / "stopped")
+held = holding(data)
 got, _ = run(home, "open", "--lend", "garden1")
+held.close()
 check("opened, saying svrngs restarted to use the new one", (got["ok"], got.get("restarted"), restarts(home)), (True, RESTARTED, ["restart"]))
 fake.close()
 
-home = case("a squatter that answers 404, and still does once svrngs restarts: one restart for each action, no byte of the token")
+# The loop the review found: the service's program says 1.13.3, but each
+# restart brings back an svrngs that answers as an older one. Each read and
+# action is a run of the helper of its own.
+home = case("an svrngs that stays older once restarted: restarted once in all, whatever reads and actions follow, sent none of the token")
+fake = Fake("old")
+data = data_dir(home, port=fake.port)
+(home / "installed-version").write_text("1.13.3")
+held = holding(data)
+got, asked = older_answers(home, fake)
+again = state(home)
+held.close()
+check("restarted once in all", restarts(home), ["restart"])
+check("its read says it restarted to use that program, and what answers is still older",
+      (got["svrngs"], "restarted to use" in got.get("reason", ""), "is still older" in got.get("reason", ""),
+       "none of your token" in got.get("reason", ""), "restarted" in got), ("unreadable", True, True, True, False))
+check("and so do the actions and reads after it", {verb: "is still older" in a.get("said", "") for verb, a in {**asked, "state": {"said": again.get("reason")}}.items()},
+      {verb: True for verb in [*asked, "state"]})
+sent_none(fake)
+fake.close()
+
+home = case("a squatter that answers 404, while no svrngs holds the data dir: nothing restarted, sent none of the token")
 squat_port = closed_port()
 data_dir(home, port=squat_port)
 (home / "installed-version").write_text("1.13.3")
@@ -698,23 +786,40 @@ squat = subprocess.Popen(["python3", "-I", "-c", SQUAT, str(squat_port), "404"],
 check("it could be planted", squat.stdout.readline().strip(), "ready")
 try:
     got = state(home, "--full")
-    once = restarts(home)
     asked = {verb: run(home, *args)[0] for verb, args in ACTIONS}
 finally:
     squat.kill()
 out = squat.communicate()[0]
 received = [json.loads(line) for line in out.splitlines() if line.startswith("{")]
-still = "still isn't the new svrngs"
-check("its read restarted svrngs once, then says what answers still isn't it, and that it was sent nothing",
-      (once, got["svrngs"], still in got.get("reason", ""), "sent it nothing" in got.get("reason", ""), "restarted" in got),
-      (["restart"], "unreadable", True, True, False))
-check("approve, open, models and play each restarted it once, and say the same",
-      (len(restarts(home)), {verb: (a["ok"], still in a.get("said", "")) for verb, a in asked.items()}),
-      (1 + len(ACTIONS), {verb: (False, True) for verb in asked}))
-check("it was asked only for proofs, two for each action, and never sent the token",
+check("its read says something other than your svrngs answers, and that it was sent none of the token",
+      (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "none of your token" in got.get("reason", "")),
+      ("unreadable", True, True))
+check("approve, open, models and play say the same", {verb: "something other than your svrngs" in a.get("said", "") for verb, a in asked.items()},
+      {verb: True for verb in asked})
+check("nothing restarted", restarts(home), [])
+check("it was asked only for one proof each time, and never sent the token",
       (len(received), [r["head"].split("\r\n")[0] for r in received if not r["head"].startswith("POST /v1/proof ")],
        TOKEN in out, [r["head"] for r in received if "authorization:" in r["head"].lower()]),
-      (2 * (1 + len(ACTIONS)), [], False, []))
+      (1 + len(ACTIONS), [], False, []))
+
+case("an answer to a challenge the helper's JSON reader can't read, whatever it raises: no proof, never a traceback")
+helper = helper_module()
+
+
+def deeper(raw):
+    """json.loads as it fails on nesting deeper than its Python's stack."""
+    raise RecursionError("maximum recursion depth exceeded")
+
+
+helper.json.loads, loads = deeper, helper.json.loads
+try:
+    try:
+        shown = helper.shown_proof(b"[[[[")
+    except Exception as e:
+        shown = type(e).__name__
+finally:
+    helper.json.loads = loads
+check("shown_proof finds no proof in it", shown, "")
 
 home = case("what runs here, and what is offered")
 fake = Fake()
