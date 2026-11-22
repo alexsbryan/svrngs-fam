@@ -521,20 +521,33 @@ def held(lock):
     inode by a process that has that very file open. /proc/locks names the
     file by its filesystem's device, which btrfs numbers apart from what
     stat says, so it is matched by its inode, then by that process's open
-    files (proc(5))."""
+    files (proc(5)). A row missed is read again, up to LOCK_READS times."""
     try:
         want = os.stat(lock)
-        rows = Path("/proc/locks").read_text().splitlines()
     except OSError:
         return False
-    for row in rows:
-        # "74: FLOCK  ADVISORY  WRITE 1762 00:26:81292995 0 EOF"; a waiting
-        # one reads "74: -> FLOCK …".
-        f = row.split()
-        if len(f) > 5 and f[1] == "FLOCK" and f[4].isdigit() and f[5].rpartition(":")[2] == str(want.st_ino):
-            if opens(int(f[4]), want):
-                return True
+    for _ in range(LOCK_READS):
+        try:
+            rows = Path("/proc/locks").read_text().splitlines()
+        except OSError:
+            return False
+        for row in rows:
+            # "74: FLOCK  ADVISORY  WRITE 1762 00:26:81292995 0 EOF"; a
+            # waiting one reads "74: -> FLOCK …".
+            f = row.split()
+            if len(f) > 5 and f[1] == "FLOCK" and f[4].isdigit() and f[5].rpartition(":")[2] == str(want.st_ino):
+                if opens(int(f[4]), want):
+                    return True
     return False
+
+
+# /proc/locks is a seq_file, read a page at a time, and each read finds its
+# place again by a count of locks (Linux fs/locks.c `locks_start`): a lock
+# let go before svrngs's while it is read moves svrngs's row past where the
+# next page starts, and it is missed. On the Fedora box, with 440 to 480
+# locks held, a read missed a held lock's row 4 times in about 230. A row
+# seen is held; none is said only after this many reads.
+LOCK_READS = 5
 
 
 def opens(pid, want):

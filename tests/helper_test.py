@@ -934,6 +934,39 @@ finally:
     helper.json.loads = loads
 check("shown_proof finds no proof and no nonce in it", shown, ("", ""))
 
+case("svrngs's lock held, and a read of /proc/locks that misses its row, as a lock let go meanwhile makes one: read again")
+data = data_dir(Path(tempfile.mkdtemp(dir=SCRATCH.name)))
+held = holding(data)
+reads = []
+mine = str(os.stat(data / "lock").st_ino)
+# /proc/locks once it shows this lock's row: a read of it can miss the row.
+listed = next(filter(lambda r: mine in r, (Path("/proc/locks").read_text() for _ in range(50))), "")
+check("this lock's row read from /proc/locks", mine in listed, True)
+
+
+def skipping(path, *args, **kwargs):
+    """/proc/locks as it was read with this lock's row, which is missed the
+    first `missed` times it is read."""
+    if str(path) != "/proc/locks":
+        return reading(path, *args, **kwargs)
+    reads.append(path)
+    return "\n".join(r for r in listed.splitlines() if mine not in r) if len(reads) <= missed else listed
+
+
+reading = Path.read_text
+Path.read_text = skipping
+try:
+    for missed, said in ((1, "a row missed once is found on the next read"), (helper.LOCK_READS - 1, "and on the last of LOCK_READS")):
+        reads.clear()
+        check(said, (helper.held(data / "lock"), len(reads)), (True, missed + 1))
+    reads.clear()
+    missed = helper.LOCK_READS
+    check("a row missed on every read is no lock held, after LOCK_READS reads", (helper.held(data / "lock"), len(reads)), (False, helper.LOCK_READS))
+finally:
+    Path.read_text = reading
+held.close()
+check("no lock held: none, after LOCK_READS reads", helper.held(data / "lock"), False)
+
 home = case("what runs here, and what is offered")
 fake = Fake()
 data_dir(home, port=fake.port)
