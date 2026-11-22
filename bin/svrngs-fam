@@ -19,6 +19,8 @@ Verbs:
                                   the row was listed with, and the process
                                   of this account's its line named
   unshare <name> [--group <group>]
+                                  stops lending it; stopped everywhere, it is
+                                  closed to this WiFi too (`room_closed`)
   models [--skip <label,...>]     friends' lends that answer OpenAI's
                                   v1/models, each with its lender's key, which
                                   Play is asked by;
@@ -1437,6 +1439,37 @@ def answered(answers):
     return " and ".join(said) if said else "what answers on its port"
 
 
+def room_closed(name, done):
+    """`done`, what withdrawing this computer's lend `name` said, with that
+    lend closed to this WiFi too. svrngs keeps a lend opened to the WiFi,
+    its room, by its lender's key and its name, and withdrawing the lend
+    leaves it (svrngs crates/svrngs-node/src/room.rs:12-20, lend.rs:1089-1099
+    at v1.13.3), so a lend of that name later would open to the WiFi again,
+    as this person, unsaid. So it is closed by the room's own route, by this
+    computer's key (POST /v1/room {"off"}, room/route.rs:37-40), and said,
+    where it was open; where svrngs can't say, that is said."""
+    unread = (f"svrngs couldn't say whether {name} was also open to this WiFi. If it was, a lend called {name} "
+              "opens to it again: check your home page.")
+    held, refused = connected()
+    if refused:
+        return {**done, "said": f"{done['said']}\n{unread}"}
+    at, secret = held
+    mine = lambda rows, me: [r for r in rows if isinstance(r, dict) and r.get("key") == me and r.get("name") == name]
+    try:
+        me = key_of(ask(at, secret, "GET", "/v1/groups").get("key"))
+        room = ask(at, secret, "GET", "/v1/room")
+        if me is None or not isinstance(room, list):
+            return {**done, "said": f"{done['said']}\n{unread}"}
+        if not mine(room, me):
+            return done
+        status, after = request(at, secret, "POST", "/v1/room", {"off": {"key": me, "name": name}})
+    except (Stopped, Unreadable):
+        return {**done, "said": f"{done['said']}\n{unread}"}
+    if status != 200 or not isinstance(after, list) or mine(after, me):
+        return {**done, "ok": False, "said": f"{done['said']}\n{name} is still open to this WiFi, as svrngs says it: close it on your home page."}
+    return {**done, "said": f"{done['said']}\nIt was also open to this WiFi, and that's closed now too."}
+
+
 def connected():
     """(address, token) of a running svrngs, or a reply saying why not."""
     root = data_dir()
@@ -1931,7 +1964,8 @@ def answer(argv):
         group = value(rest, "--group")
         if group is not None:
             args += ["--group", group]
-        return run_svrngs(args)
+        done = run_svrngs(args)
+        return room_closed(rest[0], done) if done["ok"] and group is None else done
     if verb in ("play", "copy") and len(rest) >= 2:
         key, name = rest[:2]
         if key_of(key) is None or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", name):

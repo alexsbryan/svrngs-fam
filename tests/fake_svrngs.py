@@ -110,6 +110,10 @@ class Fake:
         self.playable = {}
         self.opens = {}
         self.playing = []
+        # The room (svrngs room.rs): the lends on for this WiFi, (key,
+        # name), in order; `room_fails` answers its route 500.
+        self.room = []
+        self.room_fails = False
         fake = self
         connections = itertools.count(1)
 
@@ -182,6 +186,8 @@ class Fake:
                     return self.answer(200, GROUPS)
                 if self.path == "/v1/play":
                     return self.answer(200, fake.plays())
+                if self.path == "/v1/room":
+                    return self.answer(500, {"error": "the room cannot be read"}) if fake.room_fails else self.answer(200, fake.rooms())
                 if self.path.startswith("/v1/lends?namespace=") and fake.delay:
                     time.sleep(fake.delay)
                 if self.path.startswith("/v1/lends?namespace="):
@@ -211,6 +217,8 @@ class Fake:
                     return self.approve(named.group(1), body)
                 if self.path == "/v1/play":
                     return self.play(body)
+                if self.path == "/v1/room":
+                    return self.turn_room(body)
                 # axum's own answer to a route it doesn't have: 404, no body.
                 return self.answer(404, b"", "text/plain")
 
@@ -270,6 +278,18 @@ class Fake:
                     fake.playing.append((key, name))
                 return self.answer(200, fake.plays())
 
+            def turn_room(self, body):
+                """svrngs room/route.rs `turn`, its `off`: that lend
+                turned off, answered by the room as it stands then."""
+                try:
+                    (turn, lend), = json.loads(body).items()
+                    key, name = lend["key"], lend["name"]
+                except (ValueError, AttributeError, KeyError, TypeError):
+                    return self.answer(422, b"Failed to deserialize the JSON body", "text/plain")
+                if turn == "off":
+                    fake.room = [r for r in fake.room if r != (key, name)]
+                return self.answer(200, fake.rooms())
+
         self.handler = Handler
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
@@ -306,6 +326,11 @@ class Fake:
                         "open": {"is": "at", "words": None} if opened["is"] == "at" else {"is": opened["is"]},
                         "said": said[opened["is"]].format(opened["at"])})
         return out
+
+    def rooms(self):
+        """The room as svrngs room.rs `InRoom` answers it."""
+        return [{"person": "LittleMac", "key": key, "name": name, "served": {"is": "served"}, "said": "Open to this WiFi."}
+                for key, name in self.room]
 
     def close(self):
         self.server.shutdown()

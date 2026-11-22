@@ -27,7 +27,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from fake_svrngs import TOKEN, Fake  # noqa: E402
+from fake_svrngs import GROUPS, TOKEN, Fake  # noqa: E402
 from fake_svrngs import REFUSED_TOKEN  # noqa: E402
 from fake_svrngs import ask as fake_ask  # noqa: E402
 from fake_svrngs import proof as fake_proof  # noqa: E402
@@ -1264,6 +1264,30 @@ for verb in ("play", "copy"):
         asked = len(fake.seen)
         got, _ = run(home, verb, *args)
         check(f"{verb} {' '.join(args)[:24]!r}: refused, svrngs not asked", (got["ok"], len(fake.seen) - asked), (False, 0))
+fake.close()
+
+# svrngs keeps a lend opened to this WiFi by its lender's key and its name,
+# and withdrawing the lend leaves it (svrngs room.rs:12-20, lend.rs:1089-1099
+# at v1.13.3).
+home = case("Stop: a lend of yours open to this WiFi too is closed there, by its own key and name alone")
+fake = Fake()
+data_dir(home, port=fake.port)
+ME = GROUPS["key"]
+fake.room = [(ME, "garden"), (ME, "notes"), (FEDORA, "garden")]
+roomed = lambda: [json.loads(s["body"]) for s in fake.seen if s["path"] == "/v1/room" and "body" in s]
+got, _ = run(home, "unshare", "garden")
+check("stopped, and closed to this WiFi, saying so", (got["ok"], got["said"]),
+      (True, "You no longer lend garden.\nIt was also open to this WiFi, and that's closed now too."))
+check("svrngs is asked to close it, by this computer's key and its name, and nothing else", (roomed(), fake.room),
+      ([{"off": {"key": ME, "name": "garden"}}], [(ME, "notes"), (FEDORA, "garden")]))
+got, _ = run(home, "unshare", "photos")
+check("a lend not open to this WiFi: svrngs's words alone, nothing closed", (got["said"], len(roomed())), ("You no longer lend photos.", 1))
+got, _ = run(home, "unshare", "notes", "--group", "a" * 64)
+check("stopped for one group: still lent, so still as it was on this WiFi", (got["said"], len(roomed()), fake.room[0]), ("You no longer lend notes.", 1, (ME, "notes")))
+fake.room_fails = True
+got, _ = run(home, "unshare", "notes")
+check("where svrngs can't say, that is said", (got["ok"], got["said"]),
+      (True, "You no longer lend notes.\nsvrngs couldn't say whether notes was also open to this WiFi. If it was, a lend called notes opens to it again: check your home page."))
 fake.close()
 
 home = case("open: in the browser, signed in")
