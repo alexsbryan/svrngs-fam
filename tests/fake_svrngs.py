@@ -1,11 +1,18 @@
 """A stand-in for svrngs's API, as the helper meets it: a loopback HTTP server
-that answers `/v1/groups`, `/v1/lends`, `POST /v1/lends/<name>/approve` and
-`/v1/play` only with the right bearer token, and refuses any request carrying `Origin`
-or `Sec-Fetch-Site`, as svrngs does (svrngs api.rs:199-210). `mode` makes it
-answer the ways svrngs can go wrong, and "old" as an svrngs from before
-approving, which has no approve route (surface.rs `router` at v1.12.2).
+that proves it holds TOKEN to a challenge (`POST /v1/proof`, `proof`), with no
+token asked, and answers `/v1/groups`, `/v1/lends`, `POST
+/v1/lends/<name>/approve` and `/v1/play` only with the right bearer token. It
+refuses any request carrying `Origin` or `Sec-Fetch-Site`, as svrngs does (svrngs
+api.rs:199-210), and keeps each connection open for the next request, as
+svrngs does over HTTP/1.1. `mode` makes it answer the ways svrngs can go wrong:
+"closes" closes each connection once it has proved itself on it, and "old" is
+an svrngs from before approving, which has neither 1.13.3's proof route nor an
+approve route (surface.rs `router` at v1.12.2).
 """
 
+import hashlib
+import hmac
+import itertools
 import json
 import re
 import threading
@@ -13,6 +20,21 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "fake-token-0123456789abcdef"
+
+
+def proof(token, challenge, client, server):
+    """svrngs's proof that it holds `token`, made apart from the helper's:
+    HMAC-SHA256 under the token of "svrngs proof v1", the challenge, and the
+    connection's two ends as svrngs names them, a line each."""
+    said = "\n".join(("svrngs proof v1", challenge, client, server))
+    return hmac.new(token.encode(), said.encode(), hashlib.sha256).hexdigest()
+
+
+def named(address):
+    """An end of a connection as Rust's SocketAddr shows it."""
+    host, port = address[:2]
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
 
 GROUPS = {
     "groups": [
@@ -47,7 +69,9 @@ LENDS = {
 
 
 class Fake:
-    def __init__(self, mode="running"):
+    def __init__(self, mode="running", serving_after=0):
+        """`serving_after`: seconds it listens before it answers, as svrngs
+        does while it starts (node.rs `start_on`)."""
         self.mode = mode
         self.seen = []
         # Lends' labels that answer as a model, and the model names they give.
@@ -70,21 +94,36 @@ class Fake:
         self.opens = {}
         self.playing = []
         fake = self
+        connections = itertools.count(1)
 
         class Handler(BaseHTTPRequestHandler):
+            # Each connection kept open for the next request, as svrngs's
+            # HTTP/1.1 keeps it.
+            protocol_version = "HTTP/1.1"
+
             def log_message(self, *args):
                 pass
 
-            def answer(self, status, body, kind="application/json"):
+            def setup(self):
+                super().setup()
+                # Which connection each request came on, counted from 1.
+                self.connection_number = next(connections)
+
+            def seen(self, **more):
+                fake.seen.append({"path": self.path, "headers": dict(self.headers), "conn": self.connection_number, **more})
+
+            def answer(self, status, body, kind="application/json", closing=False):
                 raw = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", kind)
                 self.send_header("Content-Length", str(len(raw)))
+                if closing:
+                    self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(raw)
 
             def do_GET(self):
-                fake.seen.append({"path": self.path, "headers": dict(self.headers)})
+                self.seen()
                 if self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"):
                     return self.answer(403, {"error": "this API answers programs on this computer, not pages"})
                 if self.headers.get("Authorization") != f"Bearer {TOKEN}":
@@ -117,9 +156,14 @@ class Fake:
 
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                fake.seen.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                self.seen(body=body)
                 if self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"):
                     return self.answer(403, {"error": "this API answers programs on this computer, not pages"})
+                if self.path == "/v1/proof":
+                    # Before 1.13.3 svrngs has no such route, and answers it,
+                    # asked with no token, as axum's own 404, empty, as
+                    # svrngs 1.11.1 does.
+                    return self.prove(body) if fake.mode != "old" else self.answer(404, b"", "text/plain")
                 if self.headers.get("Authorization") != f"Bearer {TOKEN}":
                     return self.answer(401, {"error": "no token"})
                 if self.path == "/v1/open":
@@ -133,6 +177,18 @@ class Fake:
                     return self.play(body)
                 # axum's own answer to a route it doesn't have: 404, no body.
                 return self.answer(404, b"", "text/plain")
+
+            def prove(self, body):
+                """svrngs's proof for this connection: from the helper's
+                end, the peer here, to this server's own end."""
+                try:
+                    challenge = json.loads(body).get("challenge")
+                except (ValueError, AttributeError):
+                    challenge = None
+                if not isinstance(challenge, str) or not re.fullmatch(r"[0-9a-f]{64}", challenge):
+                    return self.answer(422, b"Failed to deserialize the JSON body", "text/plain")
+                made = proof(TOKEN, challenge, named(self.client_address), named(self.connection.getsockname()))
+                return self.answer(200, {"proof": made}, closing=fake.mode == "closes")
 
             def approve(self, name, body):
                 """svrngs surface.rs `approve` and share.rs `approve`, in
@@ -180,7 +236,9 @@ class Fake:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        serving = threading.Timer(serving_after, self.server.serve_forever)
+        serving.daemon = True
+        serving.start()
 
     def plays(self):
         """What has Play on, each as svrngs play.rs `Playing` answers it: at

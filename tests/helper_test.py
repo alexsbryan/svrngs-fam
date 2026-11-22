@@ -12,17 +12,21 @@ import importlib.util
 import json
 import os
 import pwd
+import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from fake_svrngs import TOKEN, Fake  # noqa: E402
+from fake_svrngs import proof as fake_proof  # noqa: E402
 
 HELPER = HERE.parent / "bin" / "svrngs-fam"
 SCRATCH = tempfile.TemporaryDirectory(prefix="svrngs-fam-test-")
@@ -111,15 +115,14 @@ STUBS = {
 }
 
 
-# The program this test runs as, which serves the stand-in svrngs (Fake):
-# what the helper is told is svrngs's own program (SVRNGS_FAM_SERVER).
+# The program this test runs as, which serves the stand-in svrngs (Fake).
 SELF = os.readlink("/proc/self/exe")
+me = os.getuid()
 
 
-def run(home, *args, installed=True, data=None, server=SELF):
+def run(home, *args, installed=True, data=None):
     """Run the helper as the shell does, with HOME at `home` and a PATH that
-    holds no svrngs, so `installed` decides alone whether one is found, and
-    `server` as svrngs's own program."""
+    holds no svrngs, so `installed` decides alone whether one is found."""
     if installed:
         command = home / ".local/bin/svrngs"
         command.parent.mkdir(parents=True, exist_ok=True)
@@ -134,15 +137,15 @@ def run(home, *args, installed=True, data=None, server=SELF):
     runtime = home / "runtime"
     runtime.mkdir(mode=0o700, exist_ok=True)
     env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime),
-           "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else "", "SVRNGS_FAM_SERVER": str(server)}
+           "SVRNGS_FAM_SVRNGS": str(home / ".local/bin/svrngs") if installed else ""}
     if data is not None:
         env["SVRNGS_DIR"] = str(data)
     done = subprocess.run([str(HELPER), *args], capture_output=True, text=True, env=env, timeout=30)
     return json.loads(done.stdout), done.stdout
 
 
-def state(home, *args, installed=True, data=None, server=SELF):
-    return run(home, "state", *args, installed=installed, data=data, server=server)[0]
+def state(home, *args, installed=True, data=None):
+    return run(home, "state", *args, installed=installed, data=data)[0]
 
 
 def listen(port, title=None, folder=None):
@@ -252,7 +255,7 @@ check("a friend's long name is cut to 200", len(got["groups"][1]["name"]), 200)
 check("a friend's lend is read", got["lends"]["a" * 64]["lent"][0]["name"], "deepseek-flash")
 check("this computer's lend, its port, its groups, and that nothing answers there now", got["mine"],
       [{"name": "garden", "port": quiet, "groups": ["a" * 64], "readable": True, "now": None}])
-check("asked with the token", all(s["headers"].get("Authorization") == f"Bearer {TOKEN}" for s in fake.seen), True)
+check("asked with the token, after each proof", all(s["headers"].get("Authorization") == f"Bearer {TOKEN}" for s in fake.seen if s["path"] != "/v1/proof"), True)
 check("never with an Origin", any("Origin" in s["headers"] for s in fake.seen), False)
 fake.close()
 
@@ -273,12 +276,13 @@ for mode, why in (("error", "500"), ("not-json", "no JSON"), ("huge", "KiB")):
     check(f"{mode}: says why", why in got.get("reason", ""), True)
     fake.close()
 
-home = case("a token svrngs refuses")
+home = case("a token file holding a token svrngs doesn't hold")
 fake = Fake()
 data_dir(home, port=fake.port, token="not-the-token-at-all")
 got = state(home)
-check("refused token: unreadable", got["svrngs"], "unreadable")
-check("refused token: says 401", "401" in got.get("reason", ""), True)
+check("another token: unreadable", got["svrngs"], "unreadable")
+check("another token: svrngs's proof isn't for it, so what answers isn't this svrngs, and was sent nothing",
+      ("something other than your svrngs" in got.get("reason", ""), [s["path"] for s in fake.seen]), (True, ["/v1/proof"]))
 fake.close()
 
 home = case("no token file")
@@ -293,36 +297,138 @@ got = state(home)
 check("foreign address: unreadable", got["svrngs"], "unreadable")
 check("foreign address: never asked", "192.168" in got.get("reason", ""), True)
 
-# Another account's program on svrngs's port, while svrngs is down: a uid
-# of this account's own subordinate range (/etc/subuid), which is no
-# account here, as `unshare --map-auto` gives it without root. It answers
-# as svrngs would and writes down every byte it is sent.
-FOREIGN = r"""
-import socket, sys
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("127.0.0.1", int(sys.argv[1])))
-s.listen()
-print("ready", flush=True)
-body = b'{"groups": [], "open": "http://evil.localhost:1/", "lent": []}'
-while True:
-    c, _ = s.accept()
-    c.settimeout(2)
+def helper_module():
+    """The helper itself, loaded as a module, so one of its functions can be
+    given input no computer here can be made to show on cue."""
+    loader = importlib.machinery.SourceFileLoader("svrngs_fam", str(HELPER))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+def ends(seen):
+    """Each connection the stand-in svrngs took, by its number: the paths
+    asked on it, in order."""
+    found = {}
+    for s in seen:
+        found.setdefault(s["conn"], []).append(s["path"])
+    return found
+
+
+# svrngs's proof as svrngs and Give make it too, for these inputs: so the
+# three can't drift apart (svrngs POST /v1/proof).
+VECTORS = (
+    ("test-token", "00" * 32, "127.0.0.1:50000", "127.0.0.1:40000", "e5a8107be851bcf50a977799f3dd752fb8a7db2607128372ab6936aa42fa046f"),
+    ("test-token", "ab" * 32, "[::1]:50001", "[::1]:40000", "bdaab3ee1e00b484f65ee220d690a8b5d462ecff25a6d9f5ac898148dec38472"),
+)
+case("svrngs's proof: the test vectors svrngs and Give are held to")
+helper = helper_module()
+check("the helper's proof of each", [helper.proof(*v[:4]) for v in VECTORS], [v[4] for v in VECTORS])
+check("the stand-in svrngs's, made apart from it", [fake_proof(*v[:4]) for v in VECTORS], [v[4] for v in VECTORS])
+check("an end of a connection named as svrngs names it, by Rust's SocketAddr",
+      [helper.end(("127.0.0.1", 50000)), helper.end(("::1", 50001, 0, 0))], ["127.0.0.1:50000", "[::1]:50001"])
+
+home = case("svrngs proves it holds the token, then is asked with it on that same connection")
+fake = Fake()
+data_dir(home, port=fake.port)
+got = state(home, "--full")
+proofs = [s for s in fake.seen if s["path"] == "/v1/proof"]
+check("running", got["svrngs"], "running")
+check("each connection carries one challenge, then one request with the token, and no other",
+      sorted({tuple(p == "/v1/proof" for p in paths) for paths in ends(fake.seen).values()}), [(True, False)])
+check("the challenge is sent with no token, no Origin and nothing else a browser sends",
+      [k for s in proofs for k in s["headers"] if k.lower() in ("authorization", "origin") or k.lower().startswith("sec-fetch")], [])
+challenges = [json.loads(s["body"]) for s in proofs]
+check("and is 32 bytes in hex, new each time",
+      (all(set(c) == {"challenge"} and re.fullmatch(r"[0-9a-f]{64}", c["challenge"]) for c in challenges),
+       len({c["challenge"] for c in challenges}) == len(challenges) > 1), (True, True))
+fake.close()
+
+home = case("svrngs while it starts: listening, not yet answering, is waited for")
+fake = Fake(serving_after=1.5)
+data_dir(home, port=fake.port)
+check("running, once it answers", state(home)["svrngs"], "running")
+fake.close()
+
+home = case("svrngs that closes the connection it proved itself on is sent nothing, on it or on another")
+fake = Fake("closes")
+data_dir(home, port=fake.port)
+got = state(home)
+check("unreadable, saying so", (got["svrngs"], "closed the connection it proved itself on" in got.get("reason", ""),
+                                "sent it nothing" in got.get("reason", "")), ("unreadable", True, True))
+check("it was asked only for its proof, never with the token",
+      ([s["path"] for s in fake.seen], any("Authorization" in s["headers"] for s in fake.seen)), (["/v1/proof"], False))
+fake.close()
+
+# A program at svrngs's address that isn't svrngs and can't read its token.
+# It answers every request as svrngs answers a challenge, by a proof made
+# with a token of its own on that connection's own ends, keeps the
+# connection open for the next, and writes down every request, whole, a
+# line of JSON each.
+ANSWER = r"""
+import hashlib, hmac, json, re, socket, sys
+
+def named(address):
+    host, port = address[:2]
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+def answer(c):
+    c.settimeout(3)
+    got = b""
     try:
-        got = c.recv(65536)
-        print(repr(got), flush=True)
-        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+        while True:
+            while b"\r\n\r\n" not in got:
+                more = c.recv(65536)
+                if not more:
+                    return
+                got += more
+            head, _, got = got.partition(b"\r\n\r\n")
+            length = re.search(rb"(?im)^content-length:[ \t]*(\d+)", head)
+            length = int(length.group(1)) if length else 0
+            while len(got) < length:
+                more = c.recv(65536)
+                if not more:
+                    break
+                got += more
+            body, got = got[:length], got[length:]
+            print(json.dumps({"head": head.decode("latin-1"), "body": body.decode("latin-1")}), flush=True)
+            try:
+                challenge = str(json.loads(body)["challenge"])
+            except (ValueError, KeyError, TypeError):
+                challenge = ""
+            said = "\n".join(("svrngs proof v1", challenge, named(c.getpeername()), named(c.getsockname())))
+            made = hmac.new(b"a token of its own", said.encode(), hashlib.sha256).hexdigest()
+            raw = json.dumps({"proof": made, "groups": [], "lent": [], "open": "http://evil.localhost:1/"}).encode()
+            c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(raw), raw))
     except OSError:
         pass
-    c.close()
+    finally:
+        c.close()
+
+def listening():
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+    s.listen()
+    return s
 """
+SQUAT = ANSWER + r"""
+s = listening()
+print("ready", flush=True)
+while True:
+    answer(s.accept()[0])
+"""
+
+# Another account's program on svrngs's port, while svrngs is down: a uid
+# of this account's own subordinate range (/etc/subuid), which is no
+# account here, as `unshare --map-auto` gives it without root.
 
 
 def foreign(port):
     """Another account's program listening on 127.0.0.1:`port`, or None
     when this computer can't make one."""
     argv = ["unshare", "--map-auto", "--map-root-user", "setpriv", "--reuid=1", "--regid=1", "--clear-groups",
-            "python3", "-I", "-c", FOREIGN, str(port)]
+            "python3", "-I", "-c", SQUAT, str(port)]
     try:
         held = subprocess.Popen(argv, cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except OSError:
@@ -343,177 +449,185 @@ def owner_of_listener(port):
     return None
 
 
-home = case("another account's program on svrngs's port is sent nothing")
+def squatted(home, squat, port, installed=True, also=()):
+    """The helper's full read, what approve, open, models and play said,
+    and every request `squat`, listening on svrngs's `port`, was sent, as
+    it wrote them down; `also` are processes of its own to stop with it."""
+    try:
+        got = state(home, "--full", installed=installed)
+        asked = {verb: run(home, *args, installed=installed)[0] for verb, args in (
+            ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
+            ("open", ("open",)), ("models", ("models",)), ("play", ("play", "d" * 64, "coder")))}
+    finally:
+        for pid in also:
+            os.kill(pid, signal.SIGKILL)
+        squat.kill()
+    out = squat.communicate()[0]
+    return got, asked, [json.loads(line) for line in out.splitlines() if line.startswith("{")], out
+
+
+def sent_nothing(got, asked, received, out, home):
+    check("its read is unreadable, saying something other than your svrngs answers and that it was sent nothing",
+          (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")),
+          ("unreadable", True, True))
+    check("approve, open, models and play each refuse, saying so",
+          {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
+          {verb: (False, True) for verb in asked})
+    check("it was asked for a proof on each connection, and sent nothing more",
+          (len(received) >= 5, [r["head"].split("\r\n")[0] for r in received if not r["head"].startswith("POST /v1/proof ")]), (True, []))
+    check("never the token, nor any header to carry one",
+          (TOKEN in out, [r["head"] for r in received if "authorization:" in r["head"].lower()]), (False, []))
+    check("nothing was opened in the browser", (home / "browser-argv").exists(), False)
+
+
+home = case("another account's program on svrngs's port is sent no byte of the token")
 squat_port = closed_port()
 data_dir(home, port=squat_port)
 (home / ".svrngs/lends/garden.json").write_text(json.dumps({"port": closed_port(), "kind": "python3", "groups": ["a" * 64]}))
 squat = foreign(squat_port)
 check("another account's listener could be planted", squat is not None and owner_of_listener(squat_port) not in (None, os.getuid()), True)
-try:
-    got = state(home, "--full")
-    asked = {verb: run(home, *args)[0] for verb, args in (
-        ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
-        ("open", ("open",)), ("models", ("models",)))}
-finally:
-    if squat:
-        squat.kill()
-received = squat.communicate()[0] if squat else ""
-check("its read is unreadable, never running", got["svrngs"], "unreadable")
-check("and says another account's program answers there, and that it was sent nothing",
-      ("account" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")), (True, True))
-check("approve, open and models each refuse, saying so",
-      {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
-      {verb: (False, True) for verb in asked})
-# Each connection it took is read, so whose it is can be told, then
-# closed: it receives `b''` for each, and never a byte.
-check("it was sent no byte on any connection, and never the token",
-      ([r for r in received.splitlines() if r != "b''"], TOKEN in received), ([], False))
-check("nothing was opened in the browser", (home / "browser-argv").exists(), False)
+if squat:
+    sent_nothing(*squatted(home, squat, squat_port), home)
 
-
-def helper_module():
-    """The helper itself, loaded as a module, so one of its functions can be
-    given input no computer here can be made to show on cue."""
-    loader = importlib.machinery.SourceFileLoader("svrngs_fam", str(HELPER))
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module
-
-
-# /proc/net/tcp as the helper reads it (proc(5)), for the server end of a
-# connection from 127.0.0.1:50000 to svrngs's 127.0.0.1:41097: each row in
-# `state`, its uid and its inode.
-HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode"
-
-
-def end_row(state, uid, inode):
-    return f"   0: 0100007F:A089 0100007F:C350 {state} 00000000:00000000 00:00000000 00000000 {uid:>5}        0 {inode} 1 0000000000000000 20 4 30 10 -1"
-
-
-class Listed:
-    """Stands in for pathlib.Path in the helper while one call runs: the
-    tables in `rows`, each read as /proc/net/tcp is."""
-    rows = {}
-
-    def __init__(self, path):
-        self.path = str(path)
-
-    def read_text(self):
-        return "\n".join([HEADER] + Listed.rows.get(self.path, [])) + "\n"
-
-
-class Connected:
-    """A connected socket's two ends, as the helper asks them."""
-
-    def getsockname(self):
-        return ("127.0.0.1", 50000)
-
-    def getpeername(self):
-        return ("127.0.0.1", 41097)
-
-
-def took(*rows):
-    """What the helper reads as having taken the connection, given `rows`,
-    waiting no more than a twentieth of a second for one to be accepted."""
-    helper = helper_module()
-    helper.Path, helper.ACCEPT_WITHIN, Listed.rows = Listed, 0.05, {"/proc/net/tcp": list(rows)}
-    return helper.taken_by(Connected())
-
-
-case("whose program took the helper's connection is read from that connection's row alone")
-me = os.getuid()
-# An earlier connection's TIME_WAIT row (06) with the same four numbers,
-# which Linux lists as uid 0 whoever held it; then this one's (01).
-check("a TIME_WAIT row before it is passed over: its account, and the socket that accepted it",
-      took(end_row("06", 0, 0), end_row("01", me, 4242)), (me, 4242))
-check("a row in any other state is no program's end of it: none, never root",
-      [took(end_row(state, 0, 0)) for state in ("06", "08", "0A")], [None, None, None])
-check("one no program has accepted yet, inode 0, names no socket to find: none", took(end_row("01", me, 0)), None)
-
-# svrngs's own program, as the helper is told it (SVRNGS_FAM_SERVER): a
-# copy of this test's python, which serves a stand-in svrngs where a case
-# runs it.
-PROGRAM = Path(SCRATCH.name) / "program" / "svrngs"
-PROGRAM.parent.mkdir()
-shutil.copy(SELF, PROGRAM)
-
-
-def squatted(home, squat, port):
-    """The helper's full read, what approve, open and models said, and every
-    byte `squat`, listening on svrngs's `port`, was sent, with PROGRAM as
-    svrngs's own program."""
-    try:
-        got = state(home, "--full", server=PROGRAM)
-        asked = {verb: run(home, *args, server=PROGRAM)[0] for verb, args in (
-            ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
-            ("open", ("open",)), ("models", ("models",)))}
-    finally:
-        squat.kill()
-    return got, asked, squat.communicate()[0]
-
-
-def sent_nothing(got, asked, received, why):
-    check(f"its read is unreadable, saying {why} and that it was sent nothing",
-          (got["svrngs"], why in got.get("reason", ""), "sent it nothing" in got.get("reason", "")), ("unreadable", True, True))
-    check("approve, open and models each refuse, saying so",
-          {verb: (a["ok"], "sent it nothing" in a.get("said", "")) for verb, a in asked.items()},
-          {verb: (False, True) for verb in asked})
-    check("it was sent no byte on any connection, and never the token",
-          ([r for r in received.splitlines() if r != "b''"], TOKEN in received), ([], False))
-
-
-home = case("a program of this account's that isn't svrngs, on svrngs's port, is sent nothing")
+home = case("a program of this account's on svrngs's port is sent no byte of the token")
 squat_port = closed_port()
 data_dir(home, port=squat_port)
-squat = subprocess.Popen(["python3", "-I", "-c", FOREIGN, str(squat_port)], cwd="/", stdout=subprocess.PIPE,
+squat = subprocess.Popen(["python3", "-I", "-c", SQUAT, str(squat_port)], cwd="/", stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, text=True)
-check("this account's listener could be planted, running a program that isn't PROGRAM",
-      (squat.stdout.readline().strip(), owner_of_listener(squat_port), os.readlink(f"/proc/{squat.pid}/exe") != str(PROGRAM)),
-      ("ready", me, True))
-sent_nothing(*squatted(home, squat, squat_port), "a program of yours that isn't svrngs")
+check("this account's listener could be planted", (squat.stdout.readline().strip(), owner_of_listener(squat_port)), ("ready", me))
+sent_nothing(*squatted(home, squat, squat_port), home)
 
-# A program of this account's in a mount namespace of its own, as a
-# container's or a sandbox's is: on a tmpfs over PROGRAM's folder there, a
-# file of its own at PROGRAM's path, which it runs, then removes. Linux
-# then names what it runs by PROGRAM's path, deleted, as it names svrngs's
-# own program after an update replaced it.
-SPOOF = 'mount -t tmpfs tmpfs "$1" && cp "$2" "$3" && exec "$3" -I -c "$4" "$5" "$3"'
-UNLINKED = "import os, sys\nos.unlink(sys.argv[2])\n" + FOREIGN
-home = case("one in a mount namespace of its own, running a file it made at svrngs's path and removed, is sent nothing")
+# The same program in a sandbox of this account's that can run svrngs's own
+# file but not read its token. Its child runs that file, ~/.local/bin/svrngs
+# where svrngs's installer puts it (svrngs web/install.sh `bin`; here a copy
+# of this test's python, as the stand-in svrngs is a python one), takes each
+# connection and keeps it, and hands it back to be read: so the process that
+# holds the connection runs svrngs's own file, as a check of whose program
+# took it reads it, and another reads what it is sent.
+HOLD = r"""
+import socket, sys
+s, back = socket.socket(fileno=int(sys.argv[1])), socket.socket(fileno=int(sys.argv[2]))
+back.send(b"r")
+kept = []
+while True:
+    c = s.accept()[0]
+    kept.append(c)
+    socket.send_fds(back, [b"c"], [c.fileno()])
+"""
+EXEC_SQUAT = ANSWER + f"HOLD = {HOLD!r}\n" + r"""
+import subprocess
+s = listening()
+mine, theirs = socket.socketpair()
+child = subprocess.Popen([sys.argv[2], "-I", "-c", HOLD, str(s.fileno()), str(theirs.fileno())],
+                         pass_fds=(s.fileno(), theirs.fileno()), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+mine.recv(1)
+print("ready", child.pid, flush=True)
+while True:
+    answer(socket.socket(fileno=socket.recv_fds(mine, 1, 1)[1][0]))
+"""
+home = case("one whose child runs svrngs's own file and keeps each connection, while it reads them, is sent no byte of the token")
 squat_port = closed_port()
 data_dir(home, port=squat_port)
-squat = subprocess.Popen(["unshare", "--map-root-user", "--mount", "sh", "-c", SPOOF, "spoof", str(PROGRAM.parent), SELF,
-                          str(PROGRAM), UNLINKED, str(squat_port)], cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-ready = squat.stdout.readline().strip()
-check("it could be planted: this account's, named as PROGRAM deleted, in another mount namespace",
-      (ready, owner_of_listener(squat_port), os.readlink(f"/proc/{squat.pid}/exe") if ready else None,
-       ready and os.stat(f"/proc/{squat.pid}/ns/mnt").st_ino != os.stat("/proc/self/ns/mnt").st_ino),
-      ("ready", me, f"{PROGRAM} (deleted)", True))
-sent_nothing(*squatted(home, squat, squat_port), "can't tell it is svrngs")
-check("PROGRAM itself is still here, as this computer has it", PROGRAM.is_file(), True)
+svrngs_file = home / ".local/bin/svrngs"
+svrngs_file.parent.mkdir(parents=True)
+shutil.copy(SELF, svrngs_file)
+squat = subprocess.Popen(["python3", "-I", "-c", EXEC_SQUAT, str(squat_port), str(svrngs_file)], cwd="/",
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+ready = squat.stdout.readline().split()
+child = int(ready[1]) if len(ready) == 2 and ready[0] == "ready" else None
+check("it could be planted: its child runs svrngs's own file, and it doesn't",
+      (child is not None, child and os.readlink(f"/proc/{child}/exe"), os.readlink(f"/proc/{squat.pid}/exe") != str(svrngs_file)),
+      (True, str(svrngs_file), True))
+sent_nothing(*squatted(home, squat, squat_port, installed=False, also=[child] if child else []), home)
 
-# The stand-in svrngs served by PROGRAM, which is then replaced as svrngs's
-# own update replaces it (update.rs `apply_at`: the new file renamed over
-# the one running).
-SERVE_FAKE = "import sys, time\nsys.path.insert(0, sys.argv[1])\nfrom fake_svrngs import Fake\nprint(Fake().port, flush=True)\ntime.sleep(300)\n"
-home = case("svrngs's own program, replaced while it runs, as an update replaces it, is svrngs still")
-served = subprocess.Popen([str(PROGRAM), "-I", "-c", SERVE_FAKE, str(HERE)], cwd="/", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+
+class Relay:
+    """A program at svrngs's address that passes each connection on to
+    svrngs where it listens, at `to`, byte for byte both ways, and keeps
+    what it is sent."""
+
+    def __init__(self, port, to):
+        self.to, self.sent = to, []
+        self.server = socket.socket()
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server.bind(("127.0.0.1", port))
+        self.server.listen()
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                near = self.server.accept()[0]
+            except OSError:
+                return
+            far = socket.create_connection(("127.0.0.1", self.to))
+            threading.Thread(target=self.carry, args=(near, far, self.sent), daemon=True).start()
+            threading.Thread(target=self.carry, args=(far, near, []), daemon=True).start()
+
+    @staticmethod
+    def carry(source, sink, kept):
+        """One way of a connection, closed on as the other end closed it."""
+        try:
+            while data := source.recv(65536):
+                kept.append(data)
+                sink.sendall(data)
+            sink.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+    def close(self):
+        self.server.close()
+
+
+home = case("a relay on svrngs's port, to svrngs itself, which proves for the relay's connection: sent no byte of the token")
+fake = Fake()
+squat_port = closed_port()
+data_dir(home, port=squat_port)
+relay = Relay(squat_port, fake.port)
 try:
-    data_dir(home, port=int(served.stdout.readline()))
-    before = state(home, server=PROGRAM)
-    shutil.copy(SELF, PROGRAM.with_name("svrngs.new"))
-    os.rename(PROGRAM.with_name("svrngs.new"), PROGRAM)
-    replaced = os.readlink(f"/proc/{served.pid}/exe")
-    after = state(home, server=PROGRAM)
-    elsewhere = state(home, server=SELF)
+    got = state(home)
 finally:
-    served.kill()
-check("served by svrngs's own program: running", before["svrngs"], "running")
-check("its program replaced as it runs: Linux names it deleted", replaced, f"{PROGRAM} (deleted)")
-check("svrngs still, by the path it runs from, in this computer's own mount namespace: running", after["svrngs"], "running")
-check("the same server, when svrngs's own program is another file, is sent nothing",
-      (elsewhere["svrngs"], "isn't svrngs" in elsewhere.get("reason", ""), "sent it nothing" in elsewhere.get("reason", "")),
+    relay.close()
+check("unreadable, saying something other than your svrngs answers and that it was sent nothing",
+      (got["svrngs"], "something other than your svrngs" in got.get("reason", ""), "sent it nothing" in got.get("reason", "")),
       ("unreadable", True, True))
+check("svrngs was asked for its proof through the relay, and proved it with its token, on the relay's connection",
+      [s["path"] for s in fake.seen], ["/v1/proof"])
+check("never the token: through the relay, or to svrngs",
+      (TOKEN in b"".join(relay.sent).decode("latin-1"), any("Authorization" in s["headers"] for s in fake.seen)), (False, False))
+check("svrngs, asked at its own port, is read", state(home, data=data_dir(home / "direct", port=fake.port))["svrngs"], "running")
+fake.close()
+
+case("what listens at svrngs's address and never answers is waited for, then sent nothing")
+waiting = socket.socket()
+waiting.bind(("127.0.0.1", 0))
+waiting.listen()
+helper = helper_module()
+helper.PROOF_WITHIN = 0.3
+began = time.monotonic()
+try:
+    helper.dial(waiting.getsockname(), TOKEN)
+    said = None
+except helper.Unreadable as e:
+    said = str(e)
+waited = time.monotonic() - began
+waiting.close()
+check("unreadable once PROOF_WITHIN has passed, saying so", (said is not None and "didn't show it is your svrngs" in said, 0.3 <= waited < 3),
+      (True, True))
+
+home = case("an svrngs from before 1.13.3, with no proof route: what to do, and sent nothing")
+fake = Fake("old")
+data_dir(home, port=fake.port)
+got = state(home, "--full")
+asked = {verb: run(home, *args)[0] for verb, args in (
+    ("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
+    ("open", ("open",)), ("models", ("models",)), ("play", ("play", "d" * 64, "coder")))}
+check("its read says what to do", (got["svrngs"], got.get("reason")), ("unreadable", NEWER))
+check("and approve, open, models and play each say it", {verb: (a["ok"], a.get("said")) for verb, a in asked.items()},
+      {verb: (False, NEWER) for verb in asked})
+check("it was asked only for its proof, never with the token",
+      ({s["path"] for s in fake.seen}, any("Authorization" in s["headers"] for s in fake.seen)), ({"/v1/proof"}, False))
+fake.close()
 
 home = case("what runs here, and what is offered")
 fake = Fake()
@@ -899,7 +1013,7 @@ got, _ = run(home, "approve", "garden", "--token", LISTED, "--pid", "4242@987654
 check("svrngs is sent the token the row was listed with, and the process its line named, and nothing else",
       posted(), [("/v1/lends/garden/approve", "application/json", {"token": LISTED, "pid": 4242, "start": 987654})])
 check("as an app on this computer: with the token, never an Origin",
-      [(s["headers"].get("Authorization"), "Origin" in s["headers"]) for s in fake.seen], [(f"Bearer {TOKEN}", False)])
+      [(s["headers"].get("Authorization"), "Origin" in s["headers"]) for s in fake.seen if s["path"] != "/v1/proof"], [(f"Bearer {TOKEN}", False)])
 check("svrngs approves it", fake.approved, ["garden"])
 check("what svrngs kept it to is said, as `svrngs approve` says it (cli.rs:1746)", (got["ok"], got["said"]),
       (True, "garden is kept to python3 in ~/garden-app now."))

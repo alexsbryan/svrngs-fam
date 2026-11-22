@@ -37,18 +37,20 @@ Verbs:
 
 It reads svrngs's public surface only: the `svrngs` command, the `api` and
 `token` files in svrngs's data directory, and the `/v1/` routes behind the
-token. It also reads `lends/*.json` there, a file format svrngs does not
-promise, for the one fact no route gives: which port each lend serves.
+token, which it sends only once svrngs has proved it holds it (`dial`). It
+also reads `lends/*.json` there, a file format svrngs does not promise, for
+the one fact no route gives: which port each lend serves.
 """
 
 import calendar
 import hashlib
+import hmac
 import http.client
-import ipaddress
 import json
 import os
 import pwd
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -146,240 +148,162 @@ def ask(at, secret, method, path, body=None, timeout=TIMEOUT):
     return answer
 
 
-def proc_address(field):
-    """An address and port as /proc/net/tcp and tcp6 give them (proc(5)):
-    the address in hex, each 32-bit word in this computer's byte order; an
-    IPv4 address mapped into IPv6 read as the IPv4 address it is."""
-    host, _, port = field.partition(":")
-    raw = bytes.fromhex(host)
-    if sys.byteorder == "little":
-        raw = b"".join(raw[i:i + 4][::-1] for i in range(0, len(raw), 4))
-    ip = ipaddress.ip_address(raw)
-    return (ip.ipv4_mapped or ip) if ip.version == 6 else ip, int(port, 16)
+# svrngs proves it holds the token before the helper sends it, on the
+# connection the helper then sends it on (svrngs POST /v1/proof, from
+# 1.13.3). The helper asks with a challenge, 32 random bytes in hex, new
+# each time. svrngs answers with HMAC-SHA256, keyed by the token as its
+# token file keeps it, of PROOF_OF, the challenge, and that connection's
+# two ends as svrngs sees them: the helper's, then its own (`proof`). A
+# program without the token can't make it. Nor can a relay pass on
+# svrngs's own: svrngs would make it for the relay's connection, whose ends
+# aren't the helper's.
+PROOF_OF = "svrngs proof v1"
+# How long, in seconds, the helper waits for svrngs's proof. svrngs listens
+# before it answers while it starts: node.rs `start_on` binds its API
+# (api.rs `bind`), then builds the rest before it serves, and a connection
+# made meanwhile waits for it. Nothing without the token can prove itself,
+# however long it is given.
+PROOF_WITHIN = 10.0
+# The most of an answer to a challenge the helper reads; one with a proof
+# in it is under a hundred bytes.
+MAX_PROOF = 4096
+PROVED = re.compile(r"[0-9a-f]{64}")
 
 
-# The state /proc/net/tcp gives a connection both of its ends hold open
-# (the kernel's TCP_ESTABLISHED, 01). A row in any other state is no
-# program's end of a connection just made: TIME_WAIT's (06) is one closed
-# before, which lists uid 0 whoever held it and may carry the four numbers
-# a new connection takes, so svrngs's own reader passes it over too (svrngs
-# uid.rs `read`).
-ESTABLISHED = "01"
-# How long, in seconds, the program at svrngs's address has to accept the
-# helper's connection, so the socket it holds can be found. svrngs accepts
-# at once: its API listens as tokio's TcpListener (api.rs `listening`),
-# which waits on no first bytes.
-ACCEPT_WITHIN = 1.0
+def proof(secret, challenge, client, server):
+    """svrngs's proof that it holds `secret`, for `challenge` asked on the
+    connection from `client` to `server`, in lowercase hex."""
+    said = f"{PROOF_OF}\n{challenge}\n{client}\n{server}"
+    return hmac.new(secret.encode(), said.encode(), hashlib.sha256).hexdigest()
 
 
-def taken_by(sock):
-    """The server end of `sock`'s connection, (uid, inode): the account
-    whose socket took it, an accepted connection's uid being its listener's,
-    and the inode of the socket the program that accepted it holds. Read
-    from the row of /proc/net/tcp or tcp6 whose own address is where `sock`
-    connected, whose far one is `sock`'s, and whose state is ESTABLISHED;
-    every other row is passed over. Linux lists the connection as its
-    handshake ends, with inode 0 until a program accepts it, so it is looked
-    for again, waiting longer each time, for ACCEPT_WITHIN. None when no
-    such row is read by then."""
-    near, far = sock.getsockname()[:2], sock.getpeername()[:2]
-    want = ((ipaddress.ip_address(far[0]), far[1]), (ipaddress.ip_address(near[0]), near[1]))
-    began, wait = time.monotonic(), 0.001
-    while True:
-        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
-            try:
-                lines = Path(table).read_text().splitlines()[1:]
-            except OSError:
-                continue
-            for line in lines:
-                f = line.split()
-                if (len(f) > 9 and f[3] == ESTABLISHED and f[7].isdigit() and f[9].isdigit() and int(f[9])
-                        and (proc_address(f[1]), proc_address(f[2])) == want):
-                    return int(f[7]), int(f[9])
-        left = ACCEPT_WITHIN - (time.monotonic() - began)
-        if left <= 0:
-            return None
-        time.sleep(min(wait, left))
-        wait *= 2
+def end(name):
+    """One end of a connection as svrngs names it, by Rust's SocketAddr:
+    127.0.0.1:50000, or [::1]:50001. `name` is a socket's, as Python gives
+    it: (host, port), and for IPv6 two numbers more."""
+    host, port = name[:2]
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
-def svrngs_files():
-    """svrngs's own program, each file it is run from, by the path that
-    resolves to: its device and inode, or None while nothing is there. They
-    are the svrngs command this helper runs (`svrngs_command`) and where
-    svrngs's installers put it: ~/.local/bin/svrngs, which svrngs's install
-    line's service runs (svrngs web/install.sh `bin`), and /usr/bin/svrngs,
-    the svrngs-bin package's (svrngs-omarchy). SVRNGS_FAM_SERVER names one
-    file in their place, for the tests' stand-in svrngs, which their own
-    python serves: whoever sets this helper's environment names the svrngs
-    it runs (SVRNGS_FAM_SVRNGS) and the token it reads (SVRNGS_DIR) already."""
-    named = os.environ.get("SVRNGS_FAM_SERVER")
-    places = [named] if named else [svrngs_command(), str(Path.home() / ".local/bin/svrngs"), "/usr/bin/svrngs"]
-    files = {}
-    for path in {os.path.realpath(p) for p in places if p}:
-        try:
-            s = os.stat(path)
-            files[path] = (s.st_dev, s.st_ino)
-        except OSError:
-            files[path] = None
-    return files
-
-
-# How Linux names the file a process runs once that file has no name left
-# (proc(5), /proc/<pid>/exe): its last path, then this.
-DELETED = " (deleted)"
-
-
-def runs_svrngs(pid, files, here):
-    """Whether process `pid` runs svrngs's own program: the file its
-    /proc/<pid>/exe opens is one of `files` (`svrngs_files`), the very file,
-    by its device and inode, wherever that process sees it from. Or it is
-    the file one of those paths named until an update replaced it, which
-    svrngs keeps running until it restarts: svrngs's own update renames the
-    new file over it (svrngs update.rs `apply_at`), and a package's unpacks
-    the new one in its place, telling the person to run `svrngs restart`
-    (svrngs-bin.install). That file has no name left, and Linux names it by
-    its last path and DELETED; it is taken by that path only for a process
-    in this helper's own mount namespace, `here`, where a path names the
-    file this computer has there. In another, a container's or a sandbox's,
-    a program can make a file of its own at that path, run it and remove
-    it, and the name reads the same."""
-    exe = f"/proc/{pid}/exe"
+def shown_proof(raw):
+    """The proof in an answer to a challenge, `{"proof": "<hex>"}`, or ""
+    when it holds none in that shape."""
     try:
-        running = os.stat(exe)
-    except OSError:
-        return False
-    if (running.st_dev, running.st_ino) in files.values():
-        return True
-    if running.st_nlink:
-        return False
+        said = json.loads(raw) if len(raw) <= MAX_PROOF else None
+    except ValueError:
+        return ""
+    shown = said.get("proof") if isinstance(said, dict) else None
+    return shown if isinstance(shown, str) and PROVED.fullmatch(shown) else ""
+
+
+def other(port):
+    """What the panel says when what answers at svrngs's address doesn't
+    prove it holds the token."""
+    return (f"something other than your svrngs answers at svrngs's address, port {port}, so the panel sent it nothing. "
+            "svrngs can't start there until that program stops")
+
+
+def proved(conn, secret, port):
+    """The socket of `conn`, just connected to svrngs's address, once what
+    answers there has proved it holds `secret` on it (PROOF_OF), sent the
+    challenge and nothing else. Refused as Unreadable, the token sent
+    nowhere: NEWER when svrngs has no such route, an svrngs before 1.13.3;
+    any other answer, a proof that isn't svrngs's for this connection
+    among them; no answer within PROOF_WITHIN; and a connection that closes
+    after the proof, which leaves none to send on."""
+    sock = conn.sock
+    # The helper's end is the one svrngs sees the connection from, and the
+    # end the helper reached is svrngs's own.
+    client, server = end(sock.getsockname()), end(sock.getpeername())
+    challenge = secrets.token_bytes(32).hex()
+    sock.settimeout(PROOF_WITHIN)
     try:
-        shown, ns = os.readlink(exe), os.stat(f"/proc/{pid}/ns/mnt")
-    except OSError:
-        return False
-    return shown.endswith(DELETED) and shown[:-len(DELETED)] in files and (ns.st_dev, ns.st_ino) == here
+        conn.request("POST", "/v1/proof", body=json.dumps({"challenge": challenge}).encode(),
+                     headers={"Content-Type": "application/json"})
+        reply = conn.getresponse()
+        raw = reply.read(MAX_PROOF + 1)
+    except TimeoutError:
+        raise Unreadable(f"what listens at svrngs's address, port {port}, didn't show it is your svrngs within "
+                         f"{PROOF_WITHIN:.0f} seconds, so the panel sent it nothing. If svrngs is starting, try again in a moment") from None
+    except (OSError, http.client.HTTPException):
+        raise Unreadable(f"what listens at svrngs's address, port {port}, closed the connection before it showed it is your svrngs, "
+                         "so the panel sent it nothing") from None
+    if reply.status == 404:
+        raise Unreadable(NEWER)
+    if reply.status != 200 or not hmac.compare_digest(shown_proof(raw), proof(secret, challenge, client, server)):
+        raise Unreadable(other(port))
+    # The answer read whole, and the connection still open: one whose
+    # answer said to close it, http.client has closed (`getresponse`).
+    if conn.sock is not sock or not reply.isclosed():
+        raise Unreadable(f"svrngs closed the connection it proved itself on, at port {port}, so the panel sent it nothing. "
+                         "Try again in a moment")
+    return sock
 
 
-def processes():
-    """This account's processes but this one, by pid."""
-    me, self = os.getuid(), os.getpid()
-    with os.scandir("/proc") as listed:
-        for entry in listed:
-            if not entry.name.isdigit() or int(entry.name) == self:
-                continue
-            try:
-                if entry.stat().st_uid == me:
-                    yield int(entry.name)
-            except OSError:
-                continue
+class Proven:
+    """A connection on which svrngs proved it holds the token (`dial`),
+    and the one way the helper sends that token: on that socket, never
+    another. http.client connects again by itself to send on a connection
+    an answer closed (HTTPConnection.send, while its auto_open is set),
+    which `dial` turns off, and each request is sent only while the
+    connection holds the socket svrngs proved itself on."""
+
+    def __init__(self, conn, sock, secret, timeout):
+        self.conn, self.sock, self.secret = conn, sock, secret
+        sock.settimeout(timeout)
+
+    def send(self, method, path, payload=None, headers=None):
+        """svrngs's reply to one request, sent with the token."""
+        if self.conn.sock is not self.sock:
+            raise Unreadable(f"{path} wasn't asked: the connection svrngs proved itself on had closed")
+        self.conn.request(method, path, body=payload, headers={**(headers or {}), "Authorization": f"Bearer {self.secret}"})
+        return self.conn.getresponse()
+
+    def close(self):
+        self.conn.close()
 
 
-def holds(pid, inode):
-    """Whether process `pid` holds the socket `inode`: one of its
-    /proc/<pid>/fd links reads socket:[<inode>] (proc(5))."""
-    want = f"socket:[{inode}]"
-    try:
-        fds = os.scandir(f"/proc/{pid}/fd")
-    except OSError:
-        return False
-    with fds:
-        for fd in fds:
-            try:
-                if os.readlink(fd.path) == want:
-                    return True
-            except OSError:
-                continue
-    return False
-
-
-def holder(inode, files):
-    """The process of this account's holding the socket `inode`, and
-    whether it runs svrngs (`runs_svrngs`): those that run svrngs are looked
-    in first, so a request to svrngs reads no other's sockets. None when no
-    process this helper can read holds it."""
-    ns = os.stat("/proc/self/ns/mnt")
-    here, mine = (ns.st_dev, ns.st_ino), list(processes())
-    ours = {pid for pid in mine if runs_svrngs(pid, files, here)}
-    for pid in sorted(ours) + [p for p in mine if p not in ours]:
-        if holds(pid, inode):
-            return pid, pid in ours
-    return None
-
-
-def not_svrngs(pid, port, files):
-    """What the panel says of a program of this account's that answers at
-    svrngs's address and isn't svrngs (`runs_svrngs`), by the file it runs,
-    and what to do."""
-    try:
-        shown = os.readlink(f"/proc/{pid}/exe")
-    except OSError:
-        shown = command_of(pid) or "a program"
-    if shown.endswith(DELETED) and shown[:-len(DELETED)] in files:
-        return (f"a program of yours (process {pid}) answers at svrngs's address, port {port}, from {text(shown[:-len(DELETED)])} as it was "
-                "before that file was replaced, and the panel can't tell it is svrngs, so it sent it nothing. If it is svrngs, restart it: svrngs restart")
-    return (f"{text(shown.removesuffix(DELETED))} (process {pid}), a program of yours that isn't svrngs, answers at svrngs's address, "
-            f"port {port}, so the panel sent it nothing. svrngs can't start there until that program stops")
-
-
-def dial(at, timeout=TIMEOUT):
-    """A connection to svrngs's address, sent nothing yet: only once the
-    program that took it is shown to be svrngs itself, a process of this
-    account's that runs svrngs's own program (`runs_svrngs`) and holds the
-    socket that accepted it (`holder`). svrngs's port is free while svrngs
-    is stopped, and any program on this computer can listen there then, a
-    sandbox of this account's that can't read svrngs's token among them;
-    what is sent on it carries that token, which acts as this person
-    everywhere. Refused as Unreadable, sending nothing, when another
-    account's program took it, a program that isn't svrngs did, or whose it
-    is can't be read. Linux lets no other program take the connection over
-    once it is checked."""
+def dial(at, secret, timeout=TIMEOUT):
+    """A connection to svrngs's address on which svrngs has proved it holds
+    `secret` (`proved`), sent nothing else yet. svrngs's port is free while
+    svrngs is stopped, and any program on this computer can listen there
+    then, a sandbox of this account's that can't read the token among them;
+    what is sent with the token acts as this person everywhere. Stopped
+    when nothing listens there; else Unreadable, the token sent nowhere,
+    until svrngs proves it."""
     host, port = at
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    conn.auto_open = 0
     try:
         conn.connect()
     except ConnectionRefusedError:
         raise Stopped() from None
     except OSError as e:
         raise Unreadable(f"svrngs's address did not answer: {e}") from None
-    files, held = svrngs_files(), None
     try:
-        end = taken_by(conn.sock)
-        if end is not None and end[0] == os.getuid():
-            held = holder(end[1], files)
-    except (OSError, ValueError):
-        end = None
-    if held is not None and held[1]:
-        return conn
-    conn.close()
-    if end is None:
-        raise Unreadable(f"the panel couldn't tell whose program answers at svrngs's address, port {port}, so it sent it nothing")
-    if end[0] != os.getuid():
-        raise Unreadable(f"a program of the account {account_name(end[0])} answers at svrngs's address, port {port}, so the panel "
-                         f"sent it nothing. svrngs can't start there until that program stops")
-    if held is None:
-        raise Unreadable(f"the panel couldn't tell which program of yours answers at svrngs's address, port {port}, so it sent it nothing")
-    raise Unreadable(not_svrngs(held[0], port, files))
+        return Proven(conn, proved(conn, secret, port), secret, timeout)
+    except BaseException:
+        conn.close()
+        raise
 
 
 def request(at, secret, method, path, body=None, timeout=TIMEOUT):
     """One request to svrngs's API: its status, and its JSON, or None when
-    it answered something else. Sent only on a connection `dial` checked.
-    No Origin is sent: svrngs refuses a request that carries one, as coming
-    from a page (api.rs:199-210)."""
-    conn = dial(at, timeout)
-    headers = {"Authorization": f"Bearer {secret}"}
-    payload = None
+    it answered something else. Sent only on a connection svrngs proved
+    itself on (`dial`). No Origin is sent: svrngs refuses a request that
+    carries one, as coming from a page (api.rs:199-210)."""
+    proven = dial(at, secret, timeout)
+    headers, payload = {}, None
     if body is not None:
         payload = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
     try:
-        conn.request(method, path, body=payload, headers=headers)
-        reply = conn.getresponse()
+        reply = proven.send(method, path, payload, headers)
         raw = reply.read(MAX_BODY + 1)
     except (OSError, http.client.HTTPException) as e:
         raise Unreadable(f"{path} did not answer: {e}") from None
     finally:
-        conn.close()
+        proven.close()
     if len(raw) > MAX_BODY:
         raise Unreadable(f"{path} answered more than {MAX_BODY // 1024} KiB")
     try:
@@ -790,9 +714,11 @@ def lends_of(at, secret, namespace):
 
 
 # The first svrngs the panel works with: 1.13.3 carries svrngs's update
-# floor (svrngs update.rs `BUILT`, at 031211d4) and Play at a lend's
-# address (svrngs play.rs, at 2fe16c08). An svrngs older than that is told
-# NEWER, and Get svrngs installs none signed before SIGNED_SINCE.
+# floor (svrngs update.rs `BUILT`, at 031211d4), Play at a lend's address
+# (svrngs play.rs, at 2fe16c08) and the proof svrngs gives before the
+# helper sends its token (POST /v1/proof, `proved`). An svrngs older than
+# that has no such route, and is told NEWER; Get svrngs installs none
+# signed before SIGNED_SINCE.
 NEEDS = "1.13.3"
 NEWER = f"This needs svrngs {NEEDS} or later. Update svrngs on its home page, then try again."
 # When 2fe16c08 was committed, in seconds since 1970 (`git log -1
@@ -1065,12 +991,11 @@ def models(skip=frozenset()):
 
     def probe(label):
         try:
-            conn = dial(at, timeout=4)
+            proven = dial(at, secret, timeout=4)
         except (Stopped, Unreadable):
             return None
         try:
-            conn.request("GET", "/v1/models", headers={"Host": f"{label}.localhost:{at[1]}", "Authorization": f"Bearer {secret}"})
-            reply = conn.getresponse()
+            reply = proven.send("GET", "/v1/models", headers={"Host": f"{label}.localhost:{at[1]}"})
             raw = reply.read(MAX_BODY + 1)
             # Its lender's program not reached (svrngs answers 502-504): not
             # known, so asked again next time, never remembered as no model.
@@ -1083,10 +1008,10 @@ def models(skip=frozenset()):
             return ids[:MAX_ROWS]
         except (ValueError, AttributeError):
             return []
-        except (OSError, http.client.HTTPException):
+        except (OSError, http.client.HTTPException, Unreadable):
             return None
         finally:
-            conn.close()
+            proven.close()
 
     # Each candidate with what it answered: its models, [] for none, or null
     # when it was not asked (--skip) or could not be reached.
