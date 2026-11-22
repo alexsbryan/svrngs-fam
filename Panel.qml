@@ -63,6 +63,8 @@ Panel {
     return out
   }
   readonly property var shownModels: fam.models.filter(function(m) { return Model.modelShown(m, root.query) })
+  // Lends with Play on that no model row shows, each drawn with its Stop.
+  readonly property var playsApart: Model.playsApart(fam.answer, fam.models).filter(function(p) { return Model.modelShown(p, root.query) })
 
   // The lend waiting for its second press: { port, program, name }, or null.
   // It stays until svrngs lends it, so a refusal can be answered in place.
@@ -106,6 +108,7 @@ Panel {
       if (Model.playOf(fam.answer, m)) out.push("unplay:" + m.label)
       if (turningOn === m.label) out.push("play:confirm", "play:cancel")
     })
+    playsApart.forEach(function(p) { out.push(Model.playStop(p)) })
     groups.forEach(function(g) {
       var view = views[g.id]
       if (!view || !view.shown) return
@@ -139,7 +142,7 @@ Panel {
       if (key === "lend") root.lendAnswered(reply)
       // Play's answers in the panel's own words, svrngs's when it refused.
       else if (/^copy:/.test(key) && reply.ok === true) fam.tell(strings.t("models.copied").arg(String(reply.address)), true)
-      else if (/^unplay:/.test(key) && reply.ok === true) fam.tell(strings.t("models.unplayed"), true)
+      else if (/^(unplay|playoff):/.test(key) && reply.ok === true) fam.tell(strings.t("models.unplayed"), true)
     }
   }
 
@@ -186,6 +189,7 @@ Panel {
     else if (stop === "play:confirm") turnOn(fam.models.filter(function(m) { return m.label === root.turningOn })[0])
     else if (stop === "play:cancel") turningOn = ""
     else if (kind === "unplay") unplay(fam.models.filter(function(m) { return m.label === rest })[0])
+    else if (kind === "playoff") stopPlay(playsApart.filter(function(p) { return Model.playStop(p) === stop })[0])
     else if (kind === "group") { toggleGroup(rest); cursorTo(stop) }
     else if (stop === "invite:confirm") invite(inviting)
     else if (stop === "invite:cancel") inviting = ""
@@ -305,6 +309,11 @@ Panel {
     if (model && turningOn === model.label && fam.act("copy:" + model.label, Model.playArgs(model, false))) turningOn = ""
   }
 
+  // Stop on a Play row no model row shows.
+  function stopPlay(p) {
+    if (p) fam.act(Model.playStop(p), Model.playArgs(p, true))
+  }
+
   function unplay(model) {
     if (model) fam.act("unplay:" + model.label, Model.playArgs(model, true))
   }
@@ -315,7 +324,8 @@ Panel {
   function modelNote(m) {
     var ids = m.models.join(", ") === m.name ? "" : m.models.join(", ")
     var played = Model.playOf(fam.answer, m)
-    var play = played === null ? "" : played.open === "at" ? strings.t("models.playing") : played.said
+    var play = played === null ? "" : played.open !== "at" ? played.said
+      : Model.playAtAddress(played) ? strings.t("models.playing") : strings.t("play.onPort")
     return [ids, play].filter(function(w) { return w !== "" }).join(" · ")
   }
 
@@ -733,7 +743,7 @@ Panel {
 
           // ---- Models your people lend ---------------------------------
           Column {
-            visible: root.isRunning && (!root.finding || root.shownModels.length > 0)
+            visible: root.isRunning && (!root.finding || root.shownModels.length + root.playsApart.length > 0)
             width: parent.width
             spacing: Style.space(8)
 
@@ -775,7 +785,7 @@ Panel {
                   }
                   Note {
                     id: playMeaning
-                    text: strings.t("play.meaning").arg(modelLine.modelData.name)
+                    text: strings.t("play.meaning").arg(modelLine.modelData.name).arg(modelLine.modelData.person)
                   }
                   Row {
                     spacing: Style.space(8)
@@ -797,9 +807,27 @@ Panel {
               text: !fam.modelsAsked ? strings.t("models.asking")
                 : fam.lendsAsked > 0 ? strings.t("models.quiet") : strings.t("models.none")
             }
+
+            // Play on for a lend no row above shows: Play stays on in svrngs
+            // until it is stopped, so it is said here, with its Stop.
+            Repeater {
+              model: root.playsApart
+              Line {
+                required property var modelData
+                words: strings.t("models.row").arg(modelData.name).arg(modelData.person || strings.t("play.nobody"))
+                note: (Model.playAtAddress(modelData) ? strings.t("play.apart").arg(modelData.name).arg(modelData.person || strings.t("play.nobody"))
+                       : strings.t("play.onPort")) + " " + modelData.said
+                Act {
+                  doing: Model.playStop(modelData)
+                  words: strings.t("action.stop")
+                  stop: doing
+                  onClicked: root.stopPlay(modelData)
+                }
+              }
+            }
           }
 
-          PanelSeparator { visible: root.isRunning && (!root.finding || root.shownModels.length > 0); foreground: root.foreground }
+          PanelSeparator { visible: root.isRunning && (!root.finding || root.shownModels.length + root.playsApart.length > 0); foreground: root.foreground }
 
           // ---- Your groups ---------------------------------------------
           Column {

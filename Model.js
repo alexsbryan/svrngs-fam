@@ -356,6 +356,29 @@ function playOf(answer, m) {
   return null
 }
 
+// Each lend with Play on that no model row shows (`models`, by its lender's
+// key and its name): its lender's computer away, the lend held, changed or
+// lent as a port, or no model now. Play stays on in svrngs, kept by that key
+// and name, and reaches whatever is lent under that name until it is
+// stopped (svrngs play.rs:10-17, :196-207), so each is drawn with its Stop.
+function playsApart(answer, models) {
+  var plays = running(answer) && Array.isArray(answer.play) ? answer.play : []
+  return plays.filter(function(p) { return !(models || []).some(function(m) { return m.key === p.key && m.name === p.name }) })
+}
+
+// Whether a lend with Play on is reached at its address here, where Play
+// lets in this account's programs alone (svrngs play.rs:289-298), not at a
+// port, where svrngs lets in any program on this computer, another
+// account's too (play.rs:19-22, :209-215).
+function playAtAddress(p) {
+  return /^http:\/\/[a-z0-9]+\.localhost:\d+\/$/.test(String(p.at || ""))
+}
+
+// The keyboard's stop, and the action's key, for Stop on a Play row.
+function playStop(p) {
+  return "playoff:" + p.key + "/" + p.name
+}
+
 // The helper's argv to turn Play on, or off, for a friend's model `m`: on,
 // the helper copies the address svrngs opens it at.
 function playArgs(m, off) {

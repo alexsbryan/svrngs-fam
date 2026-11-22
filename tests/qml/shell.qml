@@ -465,7 +465,7 @@ ShellRoot {
     // A friend's model, and Play's rows as the helper's `plays_of` gives
     // them: none, or on for it, open at its address or closed there.
     readonly property var coder: ({ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] })
-    readonly property string playMeaning: "Play lets any program of yours on this computer use coder as you, with no key, until you press Stop here or on your home page. It gives no say in your groups, and lets no other account on this computer in."
+    readonly property string playMeaning: "Play lets any program of yours on this computer use coder from Fedora as you, with no key, and whatever Fedora lends as coder later too, until you press Stop here or on your home page. It gives no say in your groups, and lets no other account on this computer in."
 
     function playing(open) {
       var answer = JSON.parse(JSON.stringify(running))
@@ -553,6 +553,53 @@ ShellRoot {
       check("with Play off, its row says nothing of it and has no Stop",
             [barPanel.modelNote(coder), barPanel.stops.indexOf("unplay:abc123")].join("|"), "|-1")
       check("and Copy address asks first again", Model.copyStep(fam.answer, coder), "ask")
+      fam.said = ""
+      apart()
+    }
+
+    // Play stays on in svrngs, by its lender's key and the lend's name,
+    // whether or not the lend is listed as a model now (svrngs play.rs): a
+    // Play row no model row shows is drawn apart, with its Stop.
+    function apart() {
+      console.log("every lend with Play on is drawn with its Stop, listed as a model or not")
+      var answer = playing("at")
+      answer.play[0].person = "Fedora"
+      answer.play.push({ key: "kana", name: "llama", person: "Ana", at: "http://ff0011.localhost:41097/", open: "apart",
+                         said: "Closed: you and its lender are in no group together now." })
+      answer.play.push({ key: "kfedora", name: "game", person: "", at: "127.0.0.1:41234", open: "at", said: "Connect to 127.0.0.1:41234." })
+      fam.models = [coder]
+      show(answer)
+      check("those no model row shows are drawn apart", JSON.stringify(barPanel.playsApart.map(function(p) { return p.name })), JSON.stringify(["llama", "game"]))
+      check("each with its Stop, beside the model row's", JSON.stringify(barPanel.stops.filter(function(s) { return /^(unplay|playoff):/.test(s) })),
+            JSON.stringify(["unplay:abc123", "playoff:kana/llama", "playoff:kfedora/game"]))
+      fam.models = []
+      check("with its model row gone, as when its lender's computer is off, coder's is drawn apart too",
+            JSON.stringify(barPanel.playsApart.map(function(p) { return p.name })), JSON.stringify(["coder", "llama", "game"]))
+      barPanel.open()
+      show(answer)
+      var shown = shownTexts(panelOf(barPanel))
+      check("drawn: whose and what Play reaches, at its address for your programs alone, and svrngs's words",
+            shown.indexOf("Play is on: any program of yours on this computer can use what Ana lends as llama, until you press Stop. Closed: you and its lender are in no group together now.") >= 0, true)
+      check("drawn: a port's Play reaches another account's programs too, and a lender no group names is said so",
+            [shown.indexOf("game · someone none of your groups names now") >= 0,
+             shown.indexOf("Play is on, at a port: any program on this computer can use it, another account's too, until you press Stop. Connect to 127.0.0.1:41234.") >= 0].join(","), "true,true")
+      press(panelOf(barPanel), "playoff:kana/llama")
+      check("its Stop asks the helper to turn Play off for it, by its lender's key and its name",
+            [JSON.stringify(fam.lastAsked), fam.doing].join("|"), JSON.stringify(["play", "kana", "llama", "--off"]) + "|playoff:kana/llama")
+      barPanel.close()
+      settle.then = harness.apartStopped
+      settle.start()
+    }
+
+    function apartStopped() {
+      fam.replied("playoff:kana/llama", { ok: true, said: "Play is off for llama." })
+      check("stopped, it says so", fam.said, "Stopped: Play is off for it.")
+      var port = playing("at")
+      port.play[0].at = "127.0.0.1:41234"
+      fam.models = [coder]
+      show(port)
+      check("a model row whose Play is at a port says another account's programs reach it too", barPanel.modelNote(coder),
+            "Play is on, at a port: any program on this computer can use it, another account's too, until you press Stop.")
       fam.said = ""
       finish()
     }

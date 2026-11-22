@@ -1195,8 +1195,8 @@ def plays_of(at, secret):
         if not isinstance(p, dict) or key_of(p.get("key")) is None:
             continue
         opened = p.get("open").get("is") if isinstance(p.get("open"), dict) else None
-        found.append({"key": p["key"], "name": text(p.get("name")), "at": text(p.get("at")),
-                      "open": opened if opened in OPENS else "unknown", "said": text(p.get("said"))})
+        found.append({"key": p["key"], "name": text(p.get("name")), "person": text(p.get("person")) if isinstance(p.get("person"), str) else "",
+                      "at": text(p.get("at")), "open": opened if opened in OPENS else "unknown", "said": text(p.get("said"))})
     return found
 
 

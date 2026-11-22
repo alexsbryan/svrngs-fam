@@ -1209,7 +1209,7 @@ check("the address svrngs answered is copied, with v1 on its end, as an OpenAI-c
       (got["ok"], (home / "clipboard").read_text() if (home / "clipboard").exists() else None), (True, f"http://model1.localhost:{fake.port}/v1"))
 check("and said, with the token never in it", (got.get("address"), TOKEN in said), (f"http://model1.localhost:{fake.port}/v1", False))
 check("a full read says what has Play on, as svrngs says it", state(home, "--full").get("play"),
-      [{"key": FEDORA, "name": "coder", "at": f"http://model1.localhost:{fake.port}/", "open": "at",
+      [{"key": FEDORA, "name": "coder", "person": "Fedora", "at": f"http://model1.localhost:{fake.port}/", "open": "at",
         "said": f"Connect to http://model1.localhost:{fake.port}/."}])
 (home / "clipboard").unlink(missing_ok=True)
 turned = len(played())

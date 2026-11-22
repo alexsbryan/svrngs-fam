@@ -62,9 +62,11 @@ doesn't carry them yet.
 omarchy plugin remove svrngs.fam
 ```
 
-That removes the plugin and leaves svrngs, with your groups. Removing svrngs
-from this computer doesn't take you out of your groups; `svrngs leave
-<group>` does. To remove svrngs too, follow
+That removes the plugin and leaves svrngs, with your groups. What you lend,
+and Play for a friend's model, stay on in svrngs until you stop them on your
+home page; Play reaches whatever that friend lends under that name. Removing
+svrngs from this computer doesn't take you out of your groups; `svrngs
+leave <group>` does. To remove svrngs too, follow
 [Remove svrngs](https://github.com/alexsbryan/svrngs-omarchy#remove-svrngs)
 for the way you installed it.
 
