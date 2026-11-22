@@ -640,6 +640,38 @@ ShellRoot {
       check("a model row whose Play is at a port says another account's programs reach it too", barPanel.modelNote(coder),
             "Play is on, at a port: any program on this computer can use it, another account's too, until you press Stop.")
       fam.said = ""
+      playKept()
+    }
+
+    // The 5 s read while the panel is open asks what listens here, never
+    // what has Play on (the helper's `--here`): Play, its Stops and Copy
+    // address's choice stay as the last FULL read said them.
+    function playKept() {
+      console.log("a read that didn't ask what has Play on keeps what the last one said")
+      var answer = playing("at")
+      answer.play.push({ key: "kana", name: "llama", person: "Ana", at: "http://ff0011.localhost:41097/", open: "at", said: "Connect to http://ff0011.localhost:41097/." })
+      fam.models = [coder]
+      show(answer)
+      show(here(5))
+      check("after a 5 s read: the model row still says Play is on, with its Stop, and Copy address still copies at once",
+            [barPanel.modelNote(coder), barPanel.stops.indexOf("unplay:abc123") >= 0, Model.copyStep(fam.answer, coder)].join("|"),
+            "Play is on: any program of yours here can use it|true|copy")
+      check("and the Play row drawn apart keeps its Stop", JSON.stringify(barPanel.stops.filter(function(s) { return /^playoff:/.test(s) })),
+            JSON.stringify(["playoff:kana/llama"]))
+      var off = JSON.parse(JSON.stringify(running))
+      off.play = []
+      show(off)
+      show(here(6))
+      check("a FULL read that says nothing has Play on is kept as said, through the next 5 s read",
+            [barPanel.modelNote(coder), barPanel.stops.filter(function(s) { return /^(unplay|playoff):/.test(s) }).length, Model.copyStep(fam.answer, coder)].join("|"), "|0|ask")
+      var unsaid = JSON.parse(JSON.stringify(running))
+      unsaid.play = null
+      show(answer)
+      show(unsaid)
+      check("one where svrngs couldn't say is that read's own: nothing kept from before it", Model.playOf(fam.answer, coder), null)
+      show({ svrngs: "stopped" })
+      show(here(7))
+      check("nor across a read that found svrngs stopped", Model.playOf(fam.answer, coder), null)
       finish()
     }
 

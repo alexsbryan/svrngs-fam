@@ -130,6 +130,15 @@ Item {
     // A read that did not ask the groups keeps what the last one heard.
     if (next.svrngs === "running" && !next.lends && answer && answer.svrngs === "running" && answer.lends)
       next.lends = answer.lends
+    // So does one that did not ask what has Play on, which only FULL asks:
+    // each ask of it is one of Play's looks, which dials the lender of a
+    // port's lend not open now (svrngs play.rs `opened`; room/kept.rs `run`
+    // serves every ask), and HERE reaches no other computer. A row kept so
+    // copies nothing turned off since, as `copy` reads Play again; its Stop,
+    // on one off already, says it is off. One svrngs couldn't say (null) is
+    // the read's own, and isn't written over.
+    if (next.svrngs === "running" && !("play" in next) && answer && answer.svrngs === "running" && ("play" in answer))
+      next.play = answer.play
     answer = next
     // svrngs restarted to use an update on the way to this read: said once.
     if (Model.restartedOf(next) !== "") tell(Model.restartedOf(next), true)
