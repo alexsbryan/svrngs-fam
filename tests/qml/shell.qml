@@ -237,6 +237,24 @@ ShellRoot {
       check("lent to two groups: the reason, token and process all come from one row",
             JSON.stringify(Model.approveArgs(barPanel.lent[0])), JSON.stringify(["approve", "garden", "--token", "t1", "--pid", "10@20"]))
 
+      console.log("two groups of one name are told apart, as svrngs tells them apart")
+      var noon = Date.UTC(2026, 10, 3, 12) / 1000
+      var twins = JSON.parse(JSON.stringify(running))
+      twins.groups = [
+        { id: "h1", name: "House", person: "LittleMac", left: false, made: { maker: "Dana", since: noon } },
+        { id: "h2", name: "House", person: "LittleMac", left: false, made: { maker: null, since: noon } },
+        { id: "h3", name: "House", person: "LittleMac", left: false, made: null },
+        { id: "w1", name: "Work", person: "LittleMac", left: false, made: { maker: "Bo", since: noon } }]
+      twins.mine = [{ name: "notes", port: 3001, groups: ["h1", "h2"] }]
+      show(twins)
+      check("each House by who made it and since when, svrngs's words; one svrngs says nothing of, by its id; Work by its name alone",
+            JSON.stringify(barPanel.groups.map(function(g) { return Model.groupLabel(barPanel.groups, g) })),
+            JSON.stringify(["House (Dana’s, since 3 Nov)", "House (yours, since 3 Nov)", "House (h3)", "Work"]))
+      check("so Lend's question names the one chosen", [barPanel.groupName("h1"), barPanel.groupName("h2")].join(" | "),
+            "House (Dana’s, since 3 Nov) | House (yours, since 3 Nov)")
+      check("and a lend's line, where it goes", barPanel.lentNote(barPanel.lent[0]), "Lent to House (Dana’s, since 3 Nov), House (yours, since 3 Nov)")
+      show(running)
+
       console.log("your rows are told by this computer's key, never by your name")
       // A member who took this computer's person's name lists a lend of
       // the same name, held, with what answers, a token and running.
@@ -747,8 +765,33 @@ ShellRoot {
 
     function finish2() {
       older()
+      twinsDrawn()
       plain()
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+    }
+
+    // Two groups called House, drawn: each group's line, Lend's choices and
+    // the invite question say which House it is.
+    function twinsDrawn() {
+      var noon = Date.UTC(2026, 10, 3, 12) / 1000
+      var twins = JSON.parse(JSON.stringify(running))
+      twins.groups = [
+        { id: "h1", name: "House", person: "LittleMac", left: false, made: { maker: "Dana", since: noon } },
+        { id: "h2", name: "House", person: "LittleMac", left: false, made: { maker: null, since: noon } }]
+      barPanel.open()
+      show(twins)
+      barPanel.askLend(barPanel.offers[0])
+      barPanel.inviting = "h2"
+      barPanel.openGroup = "h2"
+      var drawn = shownTexts(panelOf(barPanel))
+      var has = function(t) { return drawn.some(function(d) { return d.indexOf(t) >= 0 }) }
+      check("drawn: each group's line, and Lend's question, say which House it is",
+            [has("▸ House (Dana’s, since 3 Nov)"), has("▾ House (yours, since 3 Nov)"), has("Lend garden to House (Dana’s, since 3 Nov)?")].join(","), "true,true,true")
+      check("and the invite question", has("A new invite link to House (yours, since 3 Nov)"), true)
+      barPanel.lending = null
+      barPanel.inviting = ""
+      barPanel.openGroup = ""
+      barPanel.close()
     }
 
     // An svrngs older than the panel works with, as the helper's read says

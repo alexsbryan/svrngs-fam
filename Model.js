@@ -114,6 +114,24 @@ function own(answer, l) {
   return !!answer && typeof answer.key === "string" && answer.key !== "" && l.key === answer.key
 }
 
+// A group's name as the panel draws it: its name, and, where another group
+// you're in has the same one, who made it and since when this computer has
+// held it, as svrngs's home page and command say it ("Family (Dana’s, since
+// 3 Nov)"; svrngs crates/svrngs/src/cli.rs `namesakes_said`, :1736-1747 at
+// v1.13.3), so a lend or a link goes to the group the person means.
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+function groupLabel(groups, g) {
+  var twin = (groups || []).some(function(o) { return o.id !== g.id && o.name === g.name })
+  if (!twin) return g.name
+  var made = g.made
+  // What svrngs says nothing of is told apart by the group's id.
+  if (!made) return g.name + " (" + String(g.id).slice(0, 8) + ")"
+  var whose = typeof made.maker === "string" && made.maker !== "" ? made.maker + "’s" : "yours"
+  var at = typeof made.since === "number" ? new Date(made.since * 1000) : null
+  return g.name + " (" + whose + (at ? ", since " + at.getDate() + " " + MONTHS[at.getMonth()] : "") + ")"
+}
+
 // Groups this person is still in.
 function groups(answer) {
   if (!running(answer)) return []
@@ -124,7 +142,7 @@ function groups(answer) {
 function lent(answer) {
   if (!running(answer)) return []
   var names = {}
-  groups(answer).forEach(function(g) { names[g.id] = g.name })
+  groups(answer).forEach(function(g) { names[g.id] = groupLabel(groups(answer), g) })
   // Whether each is running, and whether svrngs holds it closed, as svrngs
   // lists it to its own groups, from this computer's own rows alone (`own`).
   // A held one's reason, the token it was listed with and what svrngs read

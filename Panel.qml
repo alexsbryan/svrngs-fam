@@ -213,8 +213,10 @@ Panel {
     else if (kind === "open") openLend(rest)
   }
 
+  // A group by its id, as the panel draws it, told apart from any other of
+  // its name (Model.js `groupLabel`).
   function groupName(id) {
-    for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return groups[i].name
+    for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return Model.groupLabel(groups, groups[i])
     return ""
   }
 
@@ -798,7 +800,7 @@ Panel {
                 visible: root.groups.length > 1
                 width: parent.width
                 label: strings.t("lend.group")
-                options: root.groups.map(function(g) { return { value: g.id, label: g.name } })
+                options: root.groups.map(function(g) { return { value: g.id, label: Model.groupLabel(root.groups, g) } })
                 value: root.lendGroup
                 hasCursor: root.currentStop === "lend:group"
                 foreground: root.foreground
@@ -941,7 +943,7 @@ Panel {
                   hasCursor: root.currentStop === "group:" + groupColumn.modelData.id
                   selected: groupColumn.open && !root.finding
                   foreground: root.foreground
-                  text: (groupColumn.open ? "▾ " : "▸ ") + groupColumn.modelData.name + "   " + root.summary(groupColumn.view)
+                  text: (groupColumn.open ? "▾ " : "▸ ") + Model.groupLabel(root.groups, groupColumn.modelData) + "   " + root.summary(groupColumn.view)
                   onClicked: root.toggleGroup(groupColumn.modelData.id)
                 }
 
@@ -1005,7 +1007,7 @@ Panel {
                     visible: root.inviting === groupColumn.modelData.id
                     width: parent.width
                     spacing: Style.space(6)
-                    Note { text: strings.t("invite.question").arg(groupColumn.modelData.name) }
+                    Note { text: strings.t("invite.question").arg(Model.groupLabel(root.groups, groupColumn.modelData)) }
                     Row {
                       spacing: Style.space(8)
                       Act { words: strings.t("action.makeLink"); stop: "invite:confirm"; onClicked: root.invite(groupColumn.modelData.id) }

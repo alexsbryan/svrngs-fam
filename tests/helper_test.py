@@ -281,6 +281,8 @@ quiet = closed_port()
 got = state(home, "--full")
 check("running", got["svrngs"], "running")
 check("both groups read", [g["person"] for g in got["groups"]], ["LittleMac", "Ana"])
+check("each with who made it and since when, as svrngs tells two of one name apart, or none where svrngs says none",
+      [g["made"] for g in got["groups"]], [{"maker": "Dana", "since": 1793707200}, None])
 check("a friend's long name is cut to 200", len(got["groups"][1]["name"]), 200)
 check("a friend's lend is read", got["lends"]["a" * 64]["lent"][0]["name"], "deepseek-flash")
 check("this computer's lend, its port, its groups, and that nothing answers there now", got["mine"],

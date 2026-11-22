@@ -53,8 +53,9 @@ def named(address):
 
 GROUPS = {
     "groups": [
-        {"id": "a" * 64, "name": "WorkingGroup", "person": "LittleMac", "left": False},
-        {"id": "b" * 64, "name": "<img src=x>" + "x" * 300, "person": "Ana", "left": False},
+        {"id": "a" * 64, "name": "WorkingGroup", "person": "LittleMac", "left": False,
+         "made": {"name": "WorkingGroup", "maker": "Dana", "since": 1793707200}},
+        {"id": "b" * 64, "name": "<img src=x>" + "x" * 300, "person": "Ana", "left": False, "made": None},
     ],
     "key": "c" * 64,
 }

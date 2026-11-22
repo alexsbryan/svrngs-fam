@@ -901,7 +901,8 @@ def state(full):
         held = ask(at, secret, "GET", "/v1/groups")
         groups, over = rows(held.get("groups"))
         report["groups"] = [
-            {"id": text(g.get("id")), "name": text(g.get("name")), "person": text(g.get("person")), "left": bool(g.get("left"))}
+            {"id": text(g.get("id")), "name": text(g.get("name")), "person": text(g.get("person")), "left": bool(g.get("left")),
+             "made": made_of(g.get("made"))}
             for g in groups
             if isinstance(g, dict)
         ]
@@ -945,6 +946,18 @@ def state(full):
         report["svrngs"] = "unreadable"
         report["reason"] = str(e)
     return offers_get(report)
+
+
+def made_of(value):
+    """Who made a group and since when this computer has held it, as svrngs
+    tells two groups of one name apart (svrngs GET /v1/groups `made`,
+    group.rs `Namesake`): its maker's name, None where this computer's key
+    made it, and the time in seconds since 1970, None where it can't be
+    read. None when svrngs says nothing of it."""
+    if not isinstance(value, dict):
+        return None
+    maker, since = value.get("maker"), value.get("since")
+    return {"maker": text(maker) if isinstance(maker, str) else None, "since": since if counted(since) else None}
 
 
 def offers_get(report):
