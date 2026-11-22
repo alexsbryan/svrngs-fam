@@ -651,6 +651,16 @@ ShellRoot {
       check("and every text that draws one is plain text",
             JSON.stringify(found.filter(function(t) { return t.text.indexOf("<") >= 0 && t.textFormat !== Text.PlainText }).map(function(t) { return t.text })), "[]")
       barPanel.lending = null
+
+      // Why svrngs couldn't be read, the helper's `reason`, which the hero
+      // draws as its detail (Panel.qml's PanelHero, Omarchy's): it can
+      // quote svrngs's own words and its api file.
+      show({ svrngs: "unreadable", reason: "<b>svrngs</b> answered <img src=\"http://127.0.0.1:9/r.png\">" })
+      found = texts(panelOf(barPanel), { seen: [], found: [] }).found
+      check("why svrngs couldn't be read is drawn by some text in the panel",
+            found.some(function(t) { return t.text.indexOf("<b>svrngs</b> answered <img src=") >= 0 }), true)
+      check("as plain text",
+            JSON.stringify(found.filter(function(t) { return t.text.indexOf("<") >= 0 && t.textFormat !== Text.PlainText }).map(function(t) { return t.text })), "[]")
       barPanel.close()
     }
 
