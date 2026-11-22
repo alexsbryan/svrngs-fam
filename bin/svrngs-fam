@@ -11,7 +11,8 @@ Verbs:
                                   --here only what listens on this computer
   share <port> <group> <name> [--program <kind>] [--pid <pid>@<start>] [--password-stdin]
                                   lends it as svrngs knows its port, else as
-                                  --program; with neither, asks which program
+                                  --program; with neither, asks which program;
+                                  only while svrngs runs here
   approve <name> --token <token> --pid <pid>@<start>
                                   keeps sharing a held share to what its row
                                   showed answering on its port: the token
@@ -26,10 +27,16 @@ Verbs:
                                   so this account's programs reach it there
                                   with no key, and that address copied with
                                   v1 on its end; --off turns it off
+  copy <key> <name>               the address of a friend's lend with Play
+                                  on copied, as play copies it; turns
+                                  nothing on
   open [--lend <label>] [--at <path>]
                                   opens it in the browser, signed in
-  link <group>                    makes a new invite link and copies it
-  start                           starts svrngs again, as svrngs restart does
+  link <group>                    makes a new invite link and copies it,
+                                  only while svrngs runs here
+  start                           starts svrngs again, as svrngs restart does,
+                                  unless it is older than svrngs 1.13.3
+                                  (`behind`)
   get [--link <invite link>]      installs svrngs with its own installer, once
                                   the installer's signature verifies against
                                   the svrngs release key in ../keys, made no
@@ -404,8 +411,9 @@ def renewal(port):
     restarts (svrngs-bin.install says to run `svrngs restart`). Restarted
     only while an svrngs holds the data dir (`held`), so a program that
     isn't svrngs never restarts it; only for the service that keeps this
-    data dir; only when the program it starts is NEEDS or later; and once
-    for that program and version (`stamped`)."""
+    data dir; only when the program it starts is NEEDS or later, else
+    TooOld (`behind`, the one decider); and once for that program and
+    version (`stamped`)."""
     root = data_dir()
     if not held(root / "lock"):
         raise Unreadable(other(port))
@@ -416,9 +424,10 @@ def renewal(port):
         kept = service()
         if kept is None or kept.data != os.path.realpath(root):
             raise Older()
-        if kept.version is None or kept.version < FLOOR:
-            raise Unreadable(f"This needs svrngs {NEEDS} or later. Your login service starts {kept.program}, {is_version(kept)}: "
-                             "update it on its home page, then try again.")
+        # What restarts it runs, and what it starts: the service's program.
+        old = behind(kept.program, kept)
+        if old:
+            raise TooOld(old, "restart it")
         first = stamped(kept)
         if first is None:
             raise Unreadable(f"The svrngs running here is older than {kept.program} ({version_of(kept)}). "
@@ -447,8 +456,61 @@ def version_of(kept):
     return ".".join(str(n) for n in kept.version) if kept.version else "no version"
 
 
-def is_version(kept):
-    return f"which is {version_of(kept)}" if kept.version else "which says no version this panel can read"
+# A program that would run as svrngs here, older than NEEDS or saying no
+# version this panel can read (`behind`): its path, and its version, None
+# for none.
+Old = collections.namedtuple("Old", "program version")
+
+
+def behind(run, kept):
+    """The first program that would run as svrngs, older than NEEDS or
+    saying no version this panel can read: `run`, the svrngs command the
+    helper runs to start svrngs, then the program svrngs's login service
+    starts, `kept` as `service` reads it (None when systemd keeps no such
+    service), which `svrngs restart` starts (svrngs cli.rs `restart`:
+    systemctl --user restart svrngs.service). None when each is NEEDS or
+    later. The one decider of whether the panel starts svrngs: `start` and
+    `renewal`'s restart start nothing while it names one, and a stopped
+    svrngs's read says so before anything is pressed (`stopped_here`)."""
+    for program in dict.fromkeys(p for p in (run, kept.program if kept else None) if p):
+        said = kept.version if kept and program == kept.program else version(program)
+        if said is None or said < FLOOR:
+            return Old(program, said)
+    return None
+
+
+def gettable(old):
+    """Whether Get svrngs replaces `old`: it is the svrngs Get svrngs
+    installs, in ~/.local/bin, which svrngs's installer replaces in place
+    (svrngs web/install.sh `put`, at v1.13.3) and runs from its own login
+    service (install.sh `keep`). Another, a package's, is updated as it
+    was installed."""
+    return os.path.realpath(old.program) == os.path.realpath(Path.home() / ".local/bin/svrngs")
+
+
+def too_old(old, doing):
+    """What the panel says when `old` (`behind`) keeps it from `doing`:
+    which svrngs, what it says of its version, why the panel starts none
+    older than NEEDS, and the way on (`gettable`)."""
+    which = "This svrngs" if gettable(old) else f"The svrngs at {old.program}"
+    if old.version:
+        said = f"{which} is {version_of(old)}, older than {NEEDS}, so the panel won't {doing}: its shares would open under older rules."
+    else:
+        said = (f"{which} says no version this panel can read, so the panel won't {doing}: "
+                f"if it is older than {NEEDS}, its shares would open under older rules.")
+    if gettable(old):
+        return f"{said} Press Get svrngs to install the latest signed release."
+    return f"{said} Update it the way you installed it, as with your package manager, then open this panel again."
+
+
+class TooOld(Unreadable):
+    """svrngs here is older than NEEDS, or says no version this panel can
+    read (`behind`), so the panel started nothing: said as `too_old` says
+    it, with whether Get svrngs is the way on (`get`)."""
+
+    def __init__(self, old, doing):
+        super().__init__(too_old(old, doing))
+        self.get = gettable(old)
 
 
 def held(lock):
@@ -814,6 +876,8 @@ def state(full):
         at = address(root)
         if at is None:
             report["svrngs"] = "not-installed" if not report["command"] else "never-started"
+            if report["command"]:
+                stopped_here(report, "use it")
             return report
         report["mine"] = own_lends(root)
         secret = token(root)
@@ -855,10 +919,26 @@ def state(full):
                     m["now"] = answering_now(listed, m["port"])
     except Stopped:
         report["svrngs"] = "stopped"
+        stopped_here(report, "start it")
+    except TooOld as e:
+        report["svrngs"] = "unreadable"
+        report["reason"] = str(e)
+        report["get"] = e.get
     except Unreadable as e:
         report["svrngs"] = "unreadable"
         report["reason"] = str(e)
     return report
+
+
+def stopped_here(report, doing):
+    """`report`, of an svrngs that isn't running, with what keeps the panel
+    from `doing` it when `behind` names a program, as `start` would say
+    it: its words (`older`), beside which Start svrngs is never offered,
+    and whether Get svrngs is the way on (`get`)."""
+    old = behind(svrngs_command(), service())
+    if old:
+        report["older"] = too_old(old, doing)
+        report["get"] = gettable(old)
 
 
 # Why svrngs holds a lend closed, so nobody can open it while its program
@@ -1003,14 +1083,27 @@ def older_svrngs(pid):
     return ("unknown argument `--pid`", f"--pid `{pid}` is not a process id")
 
 
-def run_svrngs(args, stdin="", raw=False, older=()):
+# svrngs's command starts svrngs itself for `share` and `link` when no
+# svrngs holds its data dir, and runs it until it is stopped (svrngs cli.rs
+# `answer` at v1.13.3:939, :956; `serve`, :1957-1990), as no check of the
+# panel's would see (`behind`): the panel runs those only while svrngs
+# runs here (`running`).
+NOT_RUNNING = "svrngs isn't running, so nothing was done. Press Start svrngs, then try again."
+
+
+def run_svrngs(args, stdin="", raw=False, older=(), running=False):
     """svrngs's reply to a command, as words for the panel; with `raw`, its
     standard output as printed, too. When svrngs refuses with one of
     `older`, it is older than the panel, and the panel says what to do
-    instead: read from what svrngs said before any line is taken out."""
+    instead: read from what svrngs said before any line is taken out.
+    With `running`, the command is run only while svrngs holds its data
+    dir (`held`), so it never starts svrngs; else NOT_RUNNING, nothing
+    run."""
     command = svrngs_command()
     if command is None:
         return {"ok": False, "said": "svrngs is not installed on this computer"}
+    if running and not held(data_dir() / "lock"):
+        return {"ok": False, "said": NOT_RUNNING}
     try:
         done = subprocess.run([command, *args], input=stdin, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
@@ -1056,12 +1149,12 @@ def lend(args, process, program, secret, older):
     svrngs knows (`known`). svrngs refuses a port it doesn't know before it
     reads, keeps or asks anything (share.rs `lend_of`), so asking again
     lends it once."""
-    done = run_svrngs(args + process, stdin=secret, older=older)
+    done = run_svrngs(args + process, stdin=secret, older=older, running=True)
     unknown = None if done["ok"] else NO_KIND.match(done["said"])
     if unknown is None:
         return done
     if program:
-        return run_svrngs(args + ["--program", program] + process, stdin=secret, older=older)
+        return run_svrngs(args + ["--program", program] + process, stdin=secret, older=older, running=True)
     known = [k for k in unknown.group("known").split(", ") if re.fullmatch(r"[a-z0-9_-]{1,64}", k)]
     return {"ok": False, "code": done["code"], "asks": "program", "known": known[:MAX_ROWS],
             "said": f"svrngs doesn't know what answers on port {args[1]}. Say which program it is, then press Lend again."}
@@ -1118,23 +1211,64 @@ def play(key, name, off):
     said = answer.get("error") if isinstance(answer, dict) else None
     if status != 200 or not isinstance(answer, list):
         return {"ok": False, "said": text(said).strip() if isinstance(said, str) and said.strip() else f"svrngs answered {status} and turned nothing"}
-    row = next((p for p in answer if isinstance(p, dict) and p.get("key") == key and p.get("name") == name), None)
+    row = played(answer, key, name)
     if off:
         if row is not None:
             return {"ok": False, "said": f"svrngs still has Play on for {name}"}
         return {"ok": True, "said": f"Play is off for {name}."}
+    return copied(row, name, at[1])
+
+
+def played(answer, key, name):
+    """The row of svrngs's answer of what has Play on (play.rs `Playing`)
+    for the lend `name` of the computer whose key is `key`, or None."""
+    rows = answer if isinstance(answer, list) else []
+    return next((p for p in rows if isinstance(p, dict) and p.get("key") == key and p.get("name") == name), None)
+
+
+def copied(row, name, port):
+    """The address of a lend with Play on copied, with v1 on its end, as an
+    OpenAI-compatible app takes it: `row`, svrngs's for it (`played`), only
+    if it is open there and that address is the lend's own on this
+    computer, whose svrngs listens on `port` (`lend_at`)."""
     opened = row.get("open") if row else None
     if not isinstance(opened, dict) or opened.get("is") != "at":
         words = row.get("said") if row else None
         return {"ok": False, "said": text(words) if isinstance(words, str) and words else f"svrngs didn't open {name} with Play"}
     address = row.get("at")
-    if not isinstance(address, str) or lend_at(address, at[1]) is None:
+    if not isinstance(address, str) or lend_at(address, port) is None:
         return {"ok": False, "said": f"svrngs opened {name} somewhere other than its address on this computer, so nothing was copied"}
     copier = shutil.which("wl-copy")
     if copier is None:
         return {"ok": False, "said": f"Play is on for {name}, but wl-copy isn't installed, so its address wasn't copied: {address}v1"}
     subprocess.run([copier], input=address + "v1", text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
     return {"ok": True, "at": address, "address": address + "v1", "said": f"Copied {address}v1."}
+
+
+def copy(key, name):
+    """The address of the lend `name` of the computer whose key is `key`
+    copied while Play is on for it (`copied`), asked of svrngs only by
+    reading what has Play on (GET /v1/play), so it never turns Play on:
+    Copy address asks it at once only where the panel's last read said
+    Play is on (Model.js `copyStep`). Play off now, as a Stop pressed on
+    the home page since leaves it, nothing is copied, and the reply says
+    so."""
+    held, refused = connected()
+    if refused:
+        return refused
+    at, secret = held
+    try:
+        status, answer = request(at, secret, "GET", "/v1/play")
+    except Stopped:
+        return {"ok": False, "said": "svrngs isn't running"}
+    except Unreadable as e:
+        return {"ok": False, "said": str(e)}
+    if status != 200 or not isinstance(answer, list):
+        return {"ok": False, "said": f"svrngs answered {status} and said nothing of Play, so nothing was copied"}
+    row = played(answer, key, name)
+    if row is None:
+        return {"ok": False, "said": f"Play is off for {name} now, so nothing was copied. Press Copy address to see what turning it on does."}
+    return copied(row, name, at[1])
 
 
 def keep_sharing(name, shown, process):
@@ -1340,7 +1474,7 @@ def invite(group):
     """A new invite link to `group`, copied. svrngs prints the link on its
     own indented line, and the one to open in a browser after it when the
     group keeps a page (svrngs cli.rs Printed)."""
-    done = run_svrngs(["link", group], raw=True)
+    done = run_svrngs(["link", group], raw=True, running=True)
     if not done["ok"]:
         return {"ok": False, "said": done["said"] or "svrngs made no link"}
     links = [line.strip() for line in done["out"].splitlines() if re.fullmatch(r"  \S+", line)]
@@ -1353,6 +1487,23 @@ def invite(group):
         return {"ok": False, "said": "wl-copy isn't installed, so the link couldn't be copied"}
     subprocess.run([copier], input=link, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
     return {"ok": True, "said": "Invite link copied. It works for a day, while this computer is on."}
+
+
+def start():
+    """svrngs started again by what keeps it running, its install line's
+    service or a package's: `svrngs restart` asks systemd to restart
+    svrngs.service, which starts it when it's stopped (svrngs cli.rs
+    `restart`). Run only when neither the svrngs command nor the program
+    that service starts is older than NEEDS (`behind`); else nothing is
+    run, and the reply says why and whether Get svrngs is the way on
+    (`get`)."""
+    command = svrngs_command()
+    if command is None:
+        return {"ok": False, "said": "svrngs is not installed on this computer"}
+    old = behind(command, service())
+    if old:
+        return {"ok": False, "said": too_old(old, "start it"), "get": gettable(old)}
+    return run_svrngs(["restart"])
 
 
 # svrngs's releases, each signed by the svrngs release key (svrngs
@@ -1635,11 +1786,11 @@ def answer(argv):
         if group is not None:
             args += ["--group", group]
         return run_svrngs(args)
-    if verb == "play" and len(rest) >= 2:
+    if verb in ("play", "copy") and len(rest) >= 2:
         key, name = rest[:2]
         if key_of(key) is None or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,63}", name):
             return {"ok": False, "said": f"not a lend's computer and name: {text(key)} {text(name)}"}
-        return play(key, name, off="--off" in rest[2:])
+        return play(key, name, off="--off" in rest[2:]) if verb == "play" else copy(key, name)
     if verb == "models":
         skip = value(rest, "--skip")
         return models(set(skip.split(",")) if skip is not None else set())
@@ -1651,10 +1802,8 @@ def answer(argv):
         return open_in_browser(body)
     if verb == "link" and rest:
         return invite(rest[0])
-    # svrngs knows what keeps it running (its install line's service, or a
-    # package's): `svrngs restart` asks that, and starts it when it's stopped.
     if verb == "start":
-        return run_svrngs(["restart"])
+        return start()
     if verb == "get":
         link = value(rest, "--link")
         return get_svrngs(link.strip() if link else None)

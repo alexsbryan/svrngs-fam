@@ -45,6 +45,8 @@ Panel {
 
   // The panel's lists.
   readonly property bool isRunning: Model.running(fam.answer)
+  // While svrngs isn't running: "start", "get" or "" (Model.js `wayOn`).
+  readonly property string wayOn: Model.wayOn(fam.answer)
   readonly property var groups: Model.groups(fam.answer)
   readonly property var lent: Model.lent(fam.answer)
   readonly property var offers: Model.offers(fam.answer)
@@ -78,6 +80,10 @@ Panel {
   // Get svrngs waiting for its second press, and the invite link given, if any.
   property bool getting: false
   property string getLink: ""
+  // The friend's model whose Copy address waits for its second press, by
+  // its label: Play is off for it, so what turning Play on lets in is said
+  // first, and nothing is turned on until Turn on and copy.
+  property string turningOn: ""
 
   // The keyboard's cursor: one stop per button, in the order they are drawn.
   property bool cursorActive: false
@@ -85,8 +91,9 @@ Panel {
   readonly property var stops: {
     var out = []
     if (!isRunning) {
-      if (fam.state === "stopped") return ["start"]
-      if (fam.state === "not-installed") return getting ? ["get:confirm", "get:cancel"] : ["get"]
+      var way = Model.wayOn(fam.answer)
+      if (way === "start") return ["start"]
+      if (way === "get") return getting ? ["get:confirm", "get:cancel"] : ["get"]
       return []
     }
     if (!finding) {
@@ -94,7 +101,11 @@ Panel {
       offers.forEach(function(o) { if (!lending || lending.port !== o.port) out.push("lend:" + o.port) })
       if (lending) out = out.concat(groups.length > 1 ? ["lend:group"] : [], ["lend:confirm", "lend:cancel"])
     }
-    shownModels.forEach(function(m) { out.push("copy:" + m.label); if (Model.playOf(fam.answer, m)) out.push("unplay:" + m.label) })
+    shownModels.forEach(function(m) {
+      out.push("copy:" + m.label)
+      if (Model.playOf(fam.answer, m)) out.push("unplay:" + m.label)
+      if (turningOn === m.label) out.push("play:confirm", "play:cancel")
+    })
     groups.forEach(function(g) {
       var view = views[g.id]
       if (!view || !view.shown) return
@@ -132,7 +143,7 @@ Panel {
     }
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; cursorActive = false; cursor = 0; query = "" }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
   onQueryChanged: cursor = 0
 
   function expanded(id) {
@@ -172,11 +183,13 @@ Panel {
       if (offer) { askLend(offer); cursorTo("lend:confirm") }
     }
     else if (kind === "copy") copyAddress(fam.models.filter(function(m) { return m.label === rest })[0])
+    else if (stop === "play:confirm") turnOn(fam.models.filter(function(m) { return m.label === root.turningOn })[0])
+    else if (stop === "play:cancel") turningOn = ""
     else if (kind === "unplay") unplay(fam.models.filter(function(m) { return m.label === rest })[0])
     else if (kind === "group") { toggleGroup(rest); cursorTo(stop) }
     else if (stop === "invite:confirm") invite(inviting)
     else if (stop === "invite:cancel") inviting = ""
-    else if (kind === "invite") { lending = null; inviting = rest; cursorTo("invite:confirm") }
+    else if (kind === "invite") { lending = null; turningOn = ""; inviting = rest; cursorTo("invite:confirm") }
     else if (kind === "home") openLend("")
     else if (kind === "open") openLend(rest)
   }
@@ -189,6 +202,7 @@ Panel {
   // The first press: say what lending it means, and wait.
   function askLend(offer) {
     inviting = ""
+    turningOn = ""
     lending = offer
     lendName = offer.name
     nameEdited = false
@@ -271,11 +285,24 @@ Panel {
     if (fam.act("invite:" + groupId, ["link", groupId])) inviting = ""
   }
 
-  // Copy address: Play turned on for that lend, so a program of yours
-  // reaches it at its address here with no key, then the address svrngs
-  // opened it at copied (the helper's `play`). Never svrngs's own key.
+  // Copy address: with Play on for that lend, its address copied at once,
+  // which turns nothing on (the helper's `copy`). With Play off, nothing
+  // runs: the panel says what Play lets in, under that model's row, and
+  // waits for Turn on and copy (Model.js `copyStep`). Never svrngs's own key.
   function copyAddress(model) {
-    if (model) fam.act("copy:" + model.label, Model.playArgs(model, false))
+    if (!model) return
+    if (Model.copyStep(fam.answer, model) === "copy") { fam.act("copy:" + model.label, Model.copyArgs(model)); return }
+    lending = null
+    inviting = ""
+    turningOn = model.label
+    cursorTo("play:confirm")
+  }
+
+  // Turn on and copy, the second press: Play turned on for that lend, so a
+  // program of yours reaches it at its address here with no key, then the
+  // address svrngs opened it at copied (the helper's `play`).
+  function turnOn(model) {
+    if (model && turningOn === model.label && fam.act("copy:" + model.label, Model.playArgs(model, false))) turningOn = ""
   }
 
   function unplay(model) {
@@ -389,8 +416,10 @@ Panel {
   }
 
   // A button for an action: says "Working…" while its own action runs, and
-  // waits while any other does.
+  // waits while any other does. Told to a screen reader as a button by its
+  // words, which qs.Ui's Button doesn't say itself, and pressed by it too.
   component Act: Button {
+    id: act
     property string doing: ""
     property string words: ""
     property string stop: ""
@@ -399,6 +428,9 @@ Panel {
     enabled: fam.doing === ""
     text: doing !== "" && fam.doing === doing ? strings.t("working") : words
     foreground: root.foreground
+    Accessible.role: Accessible.Button
+    Accessible.name: text
+    Accessible.onPressAction: if (act.enabled) act.clicked()
   }
 
   // A thing's name, which is its way in: dimmed, and pressed to no end,
@@ -503,20 +535,26 @@ Panel {
           }
 
           // ---- svrngs not running --------------------------------------
+          // An svrngs older than the panel works with is never started:
+          // the helper's words say why, in place of Start svrngs, and Get
+          // svrngs is offered where it replaces it (Model.js `wayOn`).
           Column {
-            visible: !root.isRunning && fam.answer !== null && fam.state !== "unreadable"
+            visible: !root.isRunning && fam.answer !== null && (fam.state !== "unreadable" || root.wayOn === "get")
             width: parent.width
             spacing: Style.space(8)
-            Note { text: strings.t("help." + fam.state) }
+            Note {
+              visible: fam.state !== "unreadable"
+              text: Model.olderOf(fam.answer) !== "" ? Model.olderOf(fam.answer) : strings.t("help." + fam.state)
+            }
             Act {
-              visible: fam.state === "stopped"
+              visible: root.wayOn === "start"
               doing: "start"
               words: strings.t("action.start")
               stop: "start"
               onClicked: root.startSvrngs()
             }
             Act {
-              visible: fam.state === "not-installed" && !root.getting
+              visible: root.wayOn === "get" && !root.getting
               doing: "get"
               words: strings.t("action.get")
               stop: "get"
@@ -524,10 +562,10 @@ Panel {
             }
             // The second press: what getting svrngs does, said before it does.
             Column {
-              visible: fam.state === "not-installed" && root.getting
+              visible: root.wayOn === "get" && root.getting
               width: parent.width
               spacing: Style.space(6)
-              Note { text: strings.t("get.meaning") }
+              Note { id: getMeaning; text: strings.t("get.meaning") + (fam.state === "not-installed" ? "" : " " + strings.t("get.over")) }
               TextField {
                 width: parent.width
                 text: root.getLink
@@ -538,7 +576,7 @@ Panel {
               }
               Row {
                 spacing: Style.space(8)
-                Act { doing: "get"; words: strings.t("action.get"); stop: "get:confirm"; onClicked: root.getSvrngs() }
+                Act { doing: "get"; words: strings.t("action.get"); stop: "get:confirm"; Accessible.description: getMeaning.text; onClicked: root.getSvrngs() }
                 Act { words: strings.t("action.cancel"); stop: "get:cancel"; onClicked: root.getting = false }
               }
             }
@@ -703,22 +741,53 @@ Panel {
 
             Repeater {
               model: root.shownModels
-              Line {
+              Column {
+                id: modelLine
                 required property var modelData
-                words: strings.t("models.row").arg(modelData.name).arg(modelData.person)
-                note: root.modelNote(modelData)
-                Act {
-                  doing: "copy:" + modelData.label
-                  words: strings.t("action.copyAddress")
-                  stop: doing
-                  onClicked: root.copyAddress(modelData)
+                width: parent.width
+                spacing: Style.space(4)
+                Line {
+                  words: strings.t("models.row").arg(modelLine.modelData.name).arg(modelLine.modelData.person)
+                  note: root.modelNote(modelLine.modelData)
+                  Act {
+                    doing: "copy:" + modelLine.modelData.label
+                    words: strings.t("action.copyAddress")
+                    stop: doing
+                    onClicked: root.copyAddress(modelLine.modelData)
+                  }
+                  Act {
+                    visible: Model.playOf(fam.answer, modelLine.modelData) !== null
+                    doing: "unplay:" + modelLine.modelData.label
+                    words: strings.t("action.stop")
+                    stop: doing
+                    onClicked: root.unplay(modelLine.modelData)
+                  }
                 }
-                Act {
-                  visible: Model.playOf(fam.answer, modelData) !== null
-                  doing: "unplay:" + modelData.label
-                  words: strings.t("action.stop")
-                  stop: doing
-                  onClicked: root.unplay(modelData)
+                // The second press, while Play is off for it: what turning
+                // Play on lets in, said before anything is turned on.
+                Column {
+                  visible: root.turningOn === modelLine.modelData.label
+                  width: parent.width
+                  spacing: Style.space(6)
+                  Words {
+                    text: strings.t("play.question").arg(modelLine.modelData.name)
+                    font.bold: true
+                  }
+                  Note {
+                    id: playMeaning
+                    text: strings.t("play.meaning").arg(modelLine.modelData.name)
+                  }
+                  Row {
+                    spacing: Style.space(8)
+                    Act {
+                      doing: "copy:" + modelLine.modelData.label
+                      stop: "play:confirm"
+                      words: strings.t("action.turnOnAndCopy")
+                      Accessible.description: playMeaning.text
+                      onClicked: root.turnOn(modelLine.modelData)
+                    }
+                    Act { words: strings.t("action.cancel"); stop: "play:cancel"; onClicked: root.turningOn = "" }
+                  }
                 }
               }
             }
@@ -809,7 +878,7 @@ Panel {
                       doing: "invite:" + groupColumn.modelData.id
                       words: strings.t("action.invite")
                       stop: doing
-                      onClicked: { root.lending = null; root.inviting = groupColumn.modelData.id }
+                      onClicked: { root.lending = null; root.turningOn = ""; root.inviting = groupColumn.modelData.id }
                     }
                     Act {
                       doing: "open:"

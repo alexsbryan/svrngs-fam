@@ -793,8 +793,12 @@ def sent_none(fake):
 # last: install.sh's ~/.local/bin/svrngs kept by its own unit beside a
 # package's newer one.
 OLDER_COPY = "#!/bin/bash\ncase \"$1\" in\n  version) echo 'svrngs 1.13.2 (0123abcd)' ;;\n  restart) echo restart >> \"$HOME/restarts\" ;;\nesac\n"
-for version, starts, said in (("1.13.2", None, "which is 1.13.2"), ("1.13", None, "which says no version this panel can read"),
-                              ("1.13.3", "older-svrngs", "which is 1.13.2")):
+RESTART_OLDER = ("This svrngs is 1.13.2, older than 1.13.3, so the panel won't restart it: its shares would open under older rules. "
+                 "Press Get svrngs to install the latest signed release.")
+RESTART_UNREAD = ("This svrngs says no version this panel can read, so the panel won't restart it: if it is older than 1.13.3, "
+                  "its shares would open under older rules. Press Get svrngs to install the latest signed release.")
+for version, starts, said in (("1.13.2", None, RESTART_OLDER), ("1.13", None, RESTART_UNREAD),
+                              ("1.13.3", "older-svrngs", None)):
     home = case(f"an svrngs from before 1.13.3 holding its data dir, its login service starting {starts or 'the svrngs command'}, "
                 f"which says {version if not starts else '1.13.2'}: what to do, by that program, and nothing restarted")
     fake = Fake("old")
@@ -809,8 +813,10 @@ for version, starts, said in (("1.13.2", None, "which is 1.13.2"), ("1.13", None
     held = holding(data)
     got, asked = older_answers(home, fake)
     held.close()
-    words = f"This needs svrngs 1.13.3 or later. Your login service starts {program}, {said}: update it on its home page, then try again."
-    check("its read says what to do, naming what the service starts", (got["svrngs"], got.get("reason")), ("unreadable", words))
+    words = said or (f"The svrngs at {program} is 1.13.2, older than 1.13.3, so the panel won't restart it: its shares would open under older rules. "
+                     "Update it the way you installed it, as with your package manager, then open this panel again.")
+    check("its read says what to do, naming what the service starts unless Get svrngs replaces it, and offers Get svrngs where it does",
+          (got["svrngs"], got.get("reason"), got.get("get")), ("unreadable", words, not starts))
     check("and approve, open, models and play each say it", {verb: a.get("said") for verb, a in asked.items()}, {verb: words for verb in asked})
     check("never restarted", restarts(home), [])
     sent_none(fake)
@@ -1173,6 +1179,13 @@ check("a full read says what has Play on, as svrngs says it", state(home, "--ful
       [{"key": FEDORA, "name": "coder", "at": f"http://model1.localhost:{fake.port}/", "open": "at",
         "said": f"Connect to http://model1.localhost:{fake.port}/."}])
 (home / "clipboard").unlink(missing_ok=True)
+turned = len(played())
+got, _ = run(home, "copy", FEDORA, "coder")
+check("copy, while Play is on: the address svrngs answered is copied, and svrngs is asked only what has Play on",
+      (got["ok"], got.get("address"), (home / "clipboard").read_text() if (home / "clipboard").exists() else None, len(played()) - turned,
+       [s["path"] for s in fake.seen[-2:]]),
+      (True, f"http://model1.localhost:{fake.port}/v1", f"http://model1.localhost:{fake.port}/v1", 0, ["/v1/proof", "/v1/play"]))
+(home / "clipboard").unlink(missing_ok=True)
 fake.opens = {(FEDORA, "coder"): {"is": "apart"}}
 got, _ = run(home, "play", FEDORA, "coder")
 check("closed where Play opened it: svrngs's words, and nothing copied", (got["ok"], got["said"], (home / "clipboard").exists()),
@@ -1186,10 +1199,17 @@ got, _ = run(home, "play", FEDORA, "garden")
 check("a lend not lent to this computer: svrngs's words", (got["ok"], got["said"]), (False, "garden is not lent to this computer now"))
 got, _ = run(home, "play", FEDORA, "coder", "--off")
 check("Stop turns it off", (got["ok"], played()[-1][1], fake.playing), (True, {"off": {"key": FEDORA, "name": "coder"}}, []))
-for args in (("notakey", "coder"), (FEDORA, "co der"), (FEDORA,), ()):
-    asked = len(played())
-    got, _ = run(home, "play", *args)
-    check(f"play {' '.join(args)[:24]!r}: refused, svrngs not asked", (got["ok"], len(played()) - asked), (False, 0))
+(home / "clipboard").unlink(missing_ok=True)
+turned = len(played())
+got, _ = run(home, "copy", FEDORA, "coder")
+check("copy, once Play is off, as a Stop on the home page leaves it: nothing copied, nothing turned on, and it says so",
+      (got["ok"], got["said"], (home / "clipboard").exists(), len(played()) - turned, fake.playing),
+      (False, "Play is off for coder now, so nothing was copied. Press Copy address to see what turning it on does.", False, 0, []))
+for verb in ("play", "copy"):
+    for args in (("notakey", "coder"), (FEDORA, "co der"), (FEDORA,), ()):
+        asked = len(fake.seen)
+        got, _ = run(home, verb, *args)
+        check(f"{verb} {' '.join(args)[:24]!r}: refused, svrngs not asked", (got["ok"], len(fake.seen) - asked), (False, 0))
 fake.close()
 
 home = case("open: in the browser, signed in")
@@ -1213,7 +1233,7 @@ check("a page from an earlier open is cleared", old.exists(), False)
 fake.close()
 
 home = case("invite: a new link, copied")
-data_dir(home)
+held = holding(data_dir(home))
 (home / "link-said").write_text(
     "A new link to WorkingGroup. Any link you sent before stops letting anyone new in; everyone it let in stays.\n"
     "It works for a day, while this computer is on:\n\n  svrngs:CLIENTTOKEN\n\nor, to open it in a browser:\n\n  https://group.svrnme.sh/#PAGETOKEN\n")
@@ -1224,9 +1244,24 @@ check("the link is never printed", "TOKEN" in said, False)
 (home / "link-said").write_text("A new link to WorkingGroup. It works for a day, while this computer is on:\n\n  svrngs:CLIENTTOKEN\n")
 run(home, "link", "WorkingGroup")
 check("without a page, the client's link is copied", (home / "clipboard").read_text(), "svrngs:CLIENTTOKEN")
+held.close()
+
+# svrngs's command starts svrngs itself for `share` and `link` when no
+# svrngs holds the data dir, and keeps it running (svrngs cli.rs `answer`
+# at v1.13.3:939, :956): the helper runs neither then.
+home = case("lend and invite while svrngs isn't running: svrngs's command, which would start svrngs, isn't run")
+data_dir(home, port=closed_port())
+(home / "installed-version").write_text("1.13.3")
+(home / "link-said").write_text("A new link to WorkingGroup:\n\n  https://group.svrnme.sh/#PAGETOKEN\n")
+for args in (("share", "3000", "a" * 64, "garden", "--program", "puma", "--pid", "4242@987654"), ("share", "8096", "a" * 64, "films"),
+             ("link", "WorkingGroup")):
+    got, _ = run(home, *args)
+    check(f"{' '.join(args)[:24]}: refused, saying svrngs isn't running, svrngs's command not run",
+          (got["ok"], got["said"], (home / "svrngs-calls").exists()),
+          (False, "svrngs isn't running, so nothing was done. Press Start svrngs, then try again.", False))
 
 home = case("lend and stop")
-data_dir(home)
+held = holding(data_dir(home))
 got, _ = run(home, "share", "3000", "a" * 64, "garden", "--program", "puma")
 check("lent", got["ok"], True)
 check("svrngs is told the port, group, name and program", (home / "svrngs-argv").read_text().split(), ["share", "3000", "--group", "a" * 64, "--name", "garden", "--program", "puma"])
@@ -1285,8 +1320,81 @@ check("a refusal of what svrngs couldn't parse is said whole, without the usage 
 (home / "unparsed").unlink()
 got, _ = run(home, "unshare", "garden")
 check("stopped", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["unshare", "garden"]))
-got, _ = run(home, "start")
-check("start asks svrngs to restart itself", (got["ok"], (home / "svrngs-argv").read_text().split()), (True, ["restart"]))
+held.close()
+
+
+def answering_version(path, says):
+    """A program at `path` that says `says` to `version`, as svrngs does
+    (cli.rs `Verb::Version`), and adds a line to $HOME/restarts when it is
+    asked to restart."""
+    path.write_text(f"#!/bin/bash\ncase \"$1\" in\n  version) echo '{says}' ;;\n  restart) echo restart >> \"$HOME/restarts\" ;;\nesac\n")
+    path.chmod(0o755)
+    return path
+
+
+GET_WAY = "Press Get svrngs to install the latest signed release."
+UPDATE_WAY = "Update it the way you installed it, as with your package manager, then open this panel again."
+
+
+def older_words(which, version, doing="start it"):
+    """What the panel says of an svrngs too old to start, as svrngs.fam
+    0.5.4 says it: `version` None for one that says none it can read."""
+    if version is None:
+        return (f"{which} says no version this panel can read, so the panel won't {doing}: if it is older than 1.13.3, "
+                "its shares would open under older rules.")
+    return f"{which} is {version}, older than 1.13.3, so the panel won't {doing}: its shares would open under older rules."
+
+
+# Start svrngs on a stopped svrngs: `svrngs restart` restarts the service
+# systemd keeps (svrngs cli.rs `restart`), which starts that service's
+# program; the helper runs its svrngs command to ask it. Each case: the
+# version the svrngs command says (installed-version), what the service
+# starts, a program of its own saying a version, or the command, or no
+# service; and what the panel says, or None where it starts svrngs.
+STARTS = (
+    ("the svrngs command and its service's program at 1.12.2", "1.12.2", None, older_words("This svrngs", "1.12.2") + " " + GET_WAY),
+    ("the svrngs command saying no version the panel can read", "1.13", None, older_words("This svrngs", None) + " " + GET_WAY),
+    ("the service's program at 1.13.2, the command at 1.13.3", "1.13.3", ("older-svrngs", "svrngs 1.13.2 (0123abcd)"),
+     older_words("The svrngs at {home}/older-svrngs", "1.13.2") + " " + UPDATE_WAY),
+    ("the command at 1.13.2, the service's program at 1.13.3", "1.13.2", ("newer-svrngs", "svrngs 1.13.3 (0123abcd)"),
+     older_words("This svrngs", "1.13.2") + " " + GET_WAY),
+    ("the service's program saying no version the panel can read", "1.13.3", ("odd-svrngs", "svrngs one point thirteen"),
+     older_words("The svrngs at {home}/odd-svrngs", None) + " " + UPDATE_WAY),
+    ("no login service, the command at 1.12.2", "1.12.2", "none", older_words("This svrngs", "1.12.2") + " " + GET_WAY),
+    ("the command and its service's program at 1.13.3", "1.13.3", None, None),
+    ("no login service, the command at 1.13.3", "1.13.3", "none", None),
+)
+for title, command, starts, said in STARTS:
+    home = case(f"svrngs stopped, {title}: " + ("Start svrngs starts it" if said is None else "nothing started, saying why"))
+    data_dir(home, port=closed_port())
+    (home / "installed-version").write_text(command)
+    if starts == "none":
+        (home / "no-service").touch()
+    elif starts:
+        (home / "service").write_text(f"{answering_version(home / starts[0], starts[1])}\n")
+    said = said and said.format(home=home)
+    way = said and said.endswith(GET_WAY)
+    got = state(home)
+    if said is None:
+        check("its read: stopped, nothing more", (got["svrngs"], got.get("older"), got.get("get")), ("stopped", None, None))
+        got, _ = run(home, "start")
+        check("Start svrngs asks svrngs to restart itself", (got["ok"], (home / "svrngs-argv").read_text().split(), restarts(home)),
+              (True, ["restart"], ["restart"]))
+        continue
+    check("its read: stopped, saying why the panel won't start it, and whether Get svrngs replaces it",
+          (got["svrngs"], got.get("older"), got.get("get")), ("stopped", said, way))
+    got, _ = run(home, "start")
+    check("Start svrngs runs no restart, saying the same", (got["ok"], got["said"], got.get("get"), restarts(home)), (False, said, way, []))
+
+home = case("svrngs installed, never started, at 1.12.2: its read says the panel won't use it, with Get svrngs")
+data_dir(home)
+(home / "installed-version").write_text("1.12.2")
+got = state(home)
+check("never-started, saying why, with Get svrngs", (got["svrngs"], got.get("older"), got.get("get")),
+      ("never-started", older_words("This svrngs", "1.12.2", "use it") + " " + GET_WAY, True))
+(home / "installed-version").write_text("1.13.3")
+got = state(home)
+check("at 1.13.3: never-started, nothing more", (got["svrngs"], got.get("older"), got.get("get")), ("never-started", None, None))
 
 
 def answered(home, *args):

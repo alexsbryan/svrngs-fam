@@ -35,7 +35,10 @@
   "models.asking": "Asking your people's lends…",
   "models.quiet": "None of your people's lends answered as a model just now. Their computer may be off.",
   "action.copyAddress": "Copy address",
-  "models.copied": "Copied %1, its OpenAI-compatible address for an app on this computer. It needs no key: if the app asks for one, type any text. Until you press Stop, here or on your home page, any program of yours here can use it as you.",
+  "models.copied": "Copied %1, its OpenAI-compatible address. Play is on for it: an app on this computer can use it with no key, and if the app asks for one, type any text. Press Stop to turn Play off.",
+  "play.question": "Turn on Play for %1?",
+  "play.meaning": "Play lets any program of yours on this computer use %1 as you, with no key, until you press Stop here or on your home page. It gives no say in your groups, and lets no other account on this computer in.",
+  "action.turnOnAndCopy": "Turn on and copy",
   "models.playing": "Play is on: any program of yours here can use it",
   "models.unplayed": "Stopped: Play is off for it.",
   "groups.title": "Your groups",
@@ -70,5 +73,6 @@
   "action.home": "Home page",
   "action.get": "Get svrngs",
   "get.meaning": "This downloads svrngs and its installer from svrngs's latest release, checks both against the svrngs release key, and installs svrngs for you alone, with no password. It puts svrngs in ~/.local/bin, runs it as your user service whenever you log in, adds it to your applications menu, and adds ~/.local/bin to your shell's startup file if your terminal doesn't look there yet. Then your browser opens your home page, where you start a group, or join the one your link is for.",
+  "get.over": "It replaces the older svrngs here, and keeps your groups and what you lend.",
   "get.link": "Invite link, if a friend sent you one"
 }

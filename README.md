@@ -9,10 +9,16 @@ groups share, from one icon.
 
 Nothing is lent until you say yes twice. A share reaches only the program
 you approved: when another program answers on its port, svrngs refuses it,
-and the panel offers Keep sharing it, which approves the one there now. Your svrngs key stays on your
-computer. While its panel is closed, the plugin reads svrngs only when the
-bar starts and each time svrngs starts. If svrngs was updated but the old
-one is still running, the plugin restarts it once to use the new one.
+and the panel offers Keep sharing it, which approves the one there now.
+Copy address on a friend's model says what Play lets in before it turns
+Play on: any program of yours on this computer can then use that model
+with no key, until you press Stop. Your svrngs key stays on your computer.
+
+While its panel is closed, the plugin reads svrngs only when the bar
+starts and each time svrngs starts. If svrngs was updated but the old one
+is still running, the plugin restarts it once to use the new one. It never
+starts an svrngs older than 1.13.3, the first it works with: it offers Get
+svrngs instead.
 
 ![The svrngs panel, open on a group called House](preview.png)
 
@@ -25,15 +31,16 @@ omarchy plugin add https://github.com/alexsbryan/svrngs-fam --enable
 ```
 
 Click the people icon in your bar. If svrngs isn't on your computer yet,
-press Get svrngs. If a friend sent you an invite link, paste it first. The
-plugin downloads svrngs and its installer from svrngs's latest release,
-checks both against the svrngs release key, and installs svrngs for you
-alone, with no password. It puts svrngs in `~/.local/bin`, runs it as your
-user service (`systemctl --user`) whenever you log in, adds it to your
-applications menu, and adds `~/.local/bin` to your shell's startup file if
-your terminal doesn't look there yet. The invite link is used only to join
-your friend's group. Your browser then opens your home page, where you start a
-group or join theirs.
+or it's older than 1.13.3, press Get svrngs. If a friend sent you an invite
+link, paste it first. The plugin downloads svrngs and its installer from
+svrngs's latest release, checks both against the svrngs release key, and
+installs svrngs for you alone, with no password; an older svrngs in
+`~/.local/bin` is replaced, and your groups are kept. It puts svrngs in
+`~/.local/bin`, runs it as your user service (`systemctl --user`) whenever
+you log in, adds it to your applications menu, and adds `~/.local/bin` to
+your shell's startup file if your terminal doesn't look there yet. The
+invite link is used only to join your friend's group. Your browser then
+opens your home page, where you start a group or join theirs.
 
 svrngs then takes its updates from svrngs's own page,
 [group.svrnme.sh](https://group.svrnme.sh/), whatever page your invite

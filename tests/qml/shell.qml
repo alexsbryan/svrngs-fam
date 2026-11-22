@@ -462,17 +462,54 @@ ShellRoot {
       copied()
     }
 
-    // Copy address on a friend's model: Play turned on for that lend, which
-    // lets this account's programs in at its address with no key, then the
-    // address svrngs answered copied (svrngs play.rs).
+    // A friend's model, and Play's rows as the helper's `plays_of` gives
+    // them: none, or on for it, open at its address or closed there.
+    readonly property var coder: ({ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] })
+    readonly property string playMeaning: "Play lets any program of yours on this computer use coder as you, with no key, until you press Stop here or on your home page. It gives no say in your groups, and lets no other account on this computer in."
+
+    function playing(open) {
+      var answer = JSON.parse(JSON.stringify(running))
+      var said = open === "at" ? "Connect to http://abc123.localhost:41097/." : "Closed: you and its lender are in no group together now."
+      answer.play = [{ key: "kfedora", name: "coder", at: "http://abc123.localhost:41097/", open: open, said: said }]
+      return answer
+    }
+
+    // Copy address on a friend's model with Play off: what Play lets in
+    // (svrngs play.rs: this account's programs, at its address here, with
+    // no key) is said under its row, and nothing runs until Turn on and
+    // copy, which turns Play on and copies the address svrngs answered.
+    // Pressed as a person presses, on the panel's own buttons.
     function copied() {
-      console.log("Copy address turns Play on for a friend's model")
+      console.log("Copy address with Play off: what Play lets in is said first, and nothing is turned on until Turn on and copy")
+      fam.models = [coder]
+      barPanel.open()
       show(running)
-      fam.models = [{ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
-      barPanel.copyAddress(fam.models[0])
-      check("the helper is asked to turn Play on for it, by its computer's key and its name",
+      check("with Play off for it, Copy address asks first", Model.copyStep(fam.answer, coder), "ask")
+      var before = JSON.stringify(fam.lastAsked)
+      var content = panelOf(barPanel)
+      press(content, "copy:abc123")
+      check("pressed, nothing runs", [fam.doing, JSON.stringify(fam.lastAsked) === before].join("|"), "|true")
+      check("its second press waits under its row: Turn on and copy, then Cancel",
+            JSON.stringify(barPanel.stops.filter(function(s) { return /^(copy|unplay|play):/.test(s) })), JSON.stringify(["copy:abc123", "play:confirm", "play:cancel"]))
+      var shown = shownTexts(content)
+      check("the question and what Play lets in are drawn, before anything runs",
+            [shown.indexOf("Turn on Play for coder?") >= 0, shown.indexOf(playMeaning) >= 0, shown.indexOf("Turn on and copy") >= 0].join(","), "true,true,true")
+      var confirm = withStop(content, "play:confirm")
+      check("Turn on and copy says what Play lets in to a screen reader, as its description", confirm ? confirm.Accessible.description : "no such button", playMeaning)
+      press(content, "play:cancel")
+      check("Cancel turns nothing on, and closes it", [barPanel.turningOn, fam.doing, JSON.stringify(fam.lastAsked) === before].join("|"), "||true")
+      check("its question is gone", shownTexts(content).indexOf(playMeaning) < 0, true)
+      console.log("the same by the keyboard")
+      barPanel.activate("copy:abc123")
+      check("Enter on Copy address runs nothing, and waits", [fam.doing, barPanel.turningOn].join("|"), "|abc123")
+      barPanel.activate("play:cancel")
+      check("Enter on Cancel turns nothing on", [fam.doing, barPanel.turningOn, JSON.stringify(fam.lastAsked) === before].join("|"), "||true")
+      press(content, "copy:abc123")
+      press(content, "play:confirm")
+      check("Turn on and copy asks the helper to turn Play on for it, by its computer's key and its name",
             JSON.stringify(fam.lastAsked), JSON.stringify(["play", "kfedora", "coder"]))
-      check("it runs", fam.doing, "copy:abc123")
+      check("it runs, and the question closes", [fam.doing, barPanel.turningOn].join("|"), "copy:abc123|")
+      barPanel.close()
       settle.then = harness.copiedAfter
       settle.start()
     }
@@ -481,21 +518,28 @@ ShellRoot {
       check("refused, the helper's words are said as a failure", fam.saidOk, false)
       show(running)
       fam.replied("copy:abc123", { ok: true, at: "http://abc123.localhost:41097/", address: "http://abc123.localhost:41097/v1", said: "Copied." })
-      check("copied, it says the app needs no key, any text if it insists, and how to stop", fam.said,
-            "Copied http://abc123.localhost:41097/v1, its OpenAI-compatible address for an app on this computer. It needs no key: if the app asks for one, type any text. Until you press Stop, here or on your home page, any program of yours here can use it as you.")
+      check("copied, it says what was copied and that Play is on, that the app needs no key, any text if it insists, and how to stop", fam.said,
+            "Copied http://abc123.localhost:41097/v1, its OpenAI-compatible address. Play is on for it: an app on this computer can use it with no key, and if the app asks for one, type any text. Press Stop to turn Play off.")
       check("never svrngs's own key", fam.said.indexOf(".svrngs/token") < 0 && fam.said.indexOf("token") < 0, true)
-      var playing = JSON.parse(JSON.stringify(running))
-      playing.play = [{ key: "kfedora", name: "coder", at: "http://abc123.localhost:41097/", open: "at", said: "Connect to http://abc123.localhost:41097/." }]
-      show(playing)
-      check("its row says Play is on", barPanel.modelNote(fam.models[0]), "Play is on: any program of yours here can use it")
-      check("with its Stop beside Copy address", JSON.stringify(barPanel.stops.filter(function(s) { return /^(copy|unplay):/.test(s) })),
+      show(playing("at"))
+      check("its row says Play is on", barPanel.modelNote(coder), "Play is on: any program of yours here can use it")
+      check("with its Stop beside Copy address", JSON.stringify(barPanel.stops.filter(function(s) { return /^(copy|unplay|play):/.test(s) })),
             JSON.stringify(["copy:abc123", "unplay:abc123"]))
-      playing.play[0].open = "apart"
-      playing.play[0].said = "Closed: you and its lender are in no group together now."
-      show(playing)
+      console.log("Copy address with Play on: copied at once, asking nothing and turning nothing on")
+      check("with Play on for it, Copy address copies at once", Model.copyStep(fam.answer, coder), "copy")
+      barPanel.activate("copy:abc123")
+      check("pressed, the helper copies its address with `copy`, which turns nothing on", JSON.stringify(fam.lastAsked), JSON.stringify(["copy", "kfedora", "coder"]))
+      check("and nothing asks first", barPanel.turningOn, "")
+      settle.then = harness.copiedOn
+      settle.start()
+    }
+
+    function copiedOn() {
+      show(playing("apart"))
       check("closed where Play opened it, its row says svrngs's words, and keeps its Stop",
-            [barPanel.modelNote(fam.models[0]), barPanel.stops.indexOf("unplay:abc123") >= 0].join("|"),
+            [barPanel.modelNote(coder), barPanel.stops.indexOf("unplay:abc123") >= 0].join("|"),
             "Closed: you and its lender are in no group together now.|true")
+      check("Play on, though closed there: Copy address still asks nothing", Model.copyStep(fam.answer, coder), "copy")
       barPanel.activate("unplay:abc123")
       check("Stop asks the helper to turn Play off for it", JSON.stringify(fam.lastAsked), JSON.stringify(["play", "kfedora", "coder", "--off"]))
       settle.then = harness.copiedStopped
@@ -507,7 +551,8 @@ ShellRoot {
       check("stopped, it says so", fam.said, "Stopped: Play is off for it.")
       show(running)
       check("with Play off, its row says nothing of it and has no Stop",
-            [barPanel.modelNote(fam.models[0]), barPanel.stops.indexOf("unplay:abc123")].join("|"), "|-1")
+            [barPanel.modelNote(coder), barPanel.stops.indexOf("unplay:abc123")].join("|"), "|-1")
+      check("and Copy address asks first again", Model.copyStep(fam.answer, coder), "ask")
       fam.said = ""
       finish()
     }
@@ -623,8 +668,48 @@ ShellRoot {
     }
 
     function finish2() {
+      older()
       plain()
       console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
+    }
+
+    // An svrngs older than the panel works with, as the helper's read says
+    // it (`stopped_here`, `TooOld`): its words, and whether Get svrngs
+    // replaces it. Start svrngs is never offered beside them.
+    function older() {
+      console.log("an svrngs older than the panel works with is never started from here")
+      var words = "This svrngs is 1.12.2, older than 1.13.3, so the panel won't start it: its shares would open under older rules. Press Get svrngs to install the latest signed release."
+      barPanel.getting = false
+      show({ svrngs: "stopped", older: words, get: true })
+      check("stopped and older: Get svrngs in Start svrngs's place", JSON.stringify([Model.wayOn(fam.answer), barPanel.stops]), JSON.stringify(["get", ["get"]]))
+      barPanel.activate("get")
+      check("its first press asks first, and runs nothing", [barPanel.getting, fam.doing, JSON.stringify(barPanel.stops)].join("|"), 'true||["get:confirm","get:cancel"]')
+      barPanel.activate("get:cancel")
+      show({ svrngs: "stopped", get: false,
+             older: "The svrngs at /usr/bin/svrngs is 1.12.2, older than 1.13.3, so the panel won't start it: its shares would open under older rules. Update it the way you installed it, as with your package manager, then open this panel again." })
+      check("older, and not one Get svrngs replaces: nothing to press", JSON.stringify([Model.wayOn(fam.answer), barPanel.stops]), JSON.stringify(["", []]))
+      show({ svrngs: "never-started", get: true, older: words.replace("start it", "use it") })
+      check("installed, never started, and older: Get svrngs", JSON.stringify(barPanel.stops), JSON.stringify(["get"]))
+      show({ svrngs: "unreadable", get: true, reason: "This svrngs is 1.13.2, older than 1.13.3, so the panel won't restart it: its shares would open under older rules. Press Get svrngs to install the latest signed release." })
+      check("an older svrngs running, not restarted: Get svrngs", JSON.stringify(barPanel.stops), JSON.stringify(["get"]))
+      show({ svrngs: "unreadable", reason: "/v1/groups answered 500" })
+      check("any other answer that couldn't be read: nothing to press", JSON.stringify(barPanel.stops), "[]")
+      show({ svrngs: "stopped" })
+      check("stopped, and not older: Start svrngs", JSON.stringify([Model.wayOn(fam.answer), barPanel.stops]), JSON.stringify(["start", ["start"]]))
+
+      barPanel.open()
+      show({ svrngs: "stopped", older: words, get: true })
+      var content = panelOf(barPanel)
+      var shown = shownTexts(content)
+      check("drawn: the helper's words, Get svrngs, and no Start svrngs",
+            [shown.indexOf(words) >= 0, shown.indexOf("Get svrngs") >= 0, shown.indexOf("Start svrngs") < 0].join(","), "true,true,true")
+      press(content, "get")
+      var meaning = shownTexts(content).filter(function(t) { return t.indexOf("This downloads svrngs") === 0 })[0] || ""
+      check("Get's second press says it replaces the older svrngs and keeps your groups",
+            meaning.indexOf("It replaces the older svrngs here, and keeps your groups and what you lend.") > 0, true)
+      var confirm = withStop(content, "get:confirm")
+      check("and its Get svrngs says it to a screen reader, as its description", confirm ? confirm.Accessible.description : "no such button", meaning)
+      barPanel.close()
     }
 
     // Every item under `item` that draws text it is given, as Text and
@@ -674,6 +759,30 @@ ShellRoot {
       check("as plain text",
             JSON.stringify(found.filter(function(t) { return t.text.indexOf("<") >= 0 && t.textFormat !== Text.PlainText }).map(function(t) { return t.text })), "[]")
       barPanel.close()
+    }
+
+    // The text drawn, and shown, under `item`.
+    function shownTexts(item) {
+      return texts(item, { seen: [], found: [] }).found.filter(function(t) { return t.visible }).map(function(t) { return t.text })
+    }
+
+    // The button under `item` that is the keyboard's stop `stop`, shown.
+    function withStop(item, stop) {
+      if (!item) return null
+      if (item.stop === stop && item.visible) return item
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) {
+        var found = withStop(kids[i], stop)
+        if (found) return found
+      }
+      return null
+    }
+
+    // A person's press on that button, shown and enabled.
+    function press(item, stop) {
+      var button = withStop(item, stop)
+      if (button && button.enabled) button.clicked()
+      else check("a shown, enabled button for " + stop, button ? "disabled" : "none", stop)
     }
 
     // The panel's content, as qs.Ui's KeyboardPanel loads it while open.

@@ -67,6 +67,24 @@ function running(answer) {
   return stateOf(answer) === "running"
 }
 
+// What the panel offers while svrngs isn't running: "get", Get svrngs;
+// "start", Start svrngs; or "" for nothing to press. An svrngs older than
+// the panel works with is never started from here: the helper's read says
+// why (its `older`, from `behind`, which its `start` refuses by too), and
+// whether Get svrngs, which replaces it, is the way on (its `get`).
+function wayOn(answer) {
+  var state = stateOf(answer)
+  if (state === "running" || state === "reading") return ""
+  if (state === "not-installed" || answer.get === true) return "get"
+  if (state === "stopped" && typeof answer.older !== "string") return "start"
+  return ""
+}
+
+// The helper's words for why it won't start this svrngs; "" when none.
+function olderOf(answer) {
+  return answer && typeof answer.older === "string" ? answer.older : ""
+}
+
 // Whether a lend's row is this computer's own: by the key of the computer
 // svrngs listed it for (the helper's `lends_of`), against this computer's
 // (svrngs GET /v1/groups `key`). A display name is any member's to take,
@@ -342,6 +360,21 @@ function playOf(answer, m) {
 // the helper copies the address svrngs opens it at.
 function playArgs(m, off) {
   return ["play", m.key, m.name].concat(off ? ["--off"] : [])
+}
+
+// What Copy address does for a friend's model `m`: "copy", its address
+// copied at once, while Play is on for it, which lets in nothing new (the
+// helper's `copy`, which turns nothing on); else "ask": the panel says
+// what Play lets in, and turns it on only when Turn on and copy is
+// pressed (the helper's `play`).
+function copyStep(answer, m) {
+  return playOf(answer, m) !== null ? "copy" : "ask"
+}
+
+// The helper's argv to copy the address of a friend's model `m` with Play
+// on, turning nothing on.
+function copyArgs(m) {
+  return ["copy", m.key, m.name]
 }
 
 // Whether a model matches what is typed.

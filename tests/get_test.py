@@ -8,12 +8,15 @@ releases are served from 127.0.0.1 and their keys made here, so no real
 key, release or svrngs is used."""
 
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 from functools import partial
@@ -92,6 +95,33 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
             'echo "--archive) is not taken here"\n')
     archive = b"the svrngs release built"
 
+    # svrngs's installer run over an svrngs it installed before: it unpacks
+    # the release's svrngs and moves it over the one in ~/.local/bin, as
+    # svrngs's web/install.sh does at v1.13.3 (`get`, `put svrngs`,
+    # :232-236), after stopping the one its login service runs (`stopped`,
+    # :130, :225), and starts the new one there (`keep`, :271-308).
+    replaces = takes.replace('echo "svrngs runs now."\n',
+                             'tar -xzf "$3" -C "$HOME" svrngs && mkdir -p "$HOME/.local/bin" && mv -f "$HOME/svrngs" "$HOME/.local/bin/svrngs"\n'
+                             'echo "Updated svrngs in $HOME/.local/bin."\n')
+
+    def svrngs_saying(version):
+        """A stand-in svrngs that says `version` as svrngs does (cli.rs
+        `Verb::Version`) and adds a line to $HOME/restarts when asked to
+        restart."""
+        return (f"#!/bin/sh\ncase \"$1\" in\n  version) echo 'svrngs {version} (0123abcd)' ;;\n"
+                '  restart) echo restart >> "$HOME/restarts" ;;\nesac\n').encode()
+
+    def tarball(program):
+        """A release archive holding `program` as svrngs, as svrngs's is."""
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode="w:gz") as tar:
+            entry = tarfile.TarInfo("svrngs")
+            entry.size, entry.mode = len(program), 0o755
+            tar.addfile(entry, io.BytesIO(program))
+        return raw.getvalue()
+
+    newer = tarball(svrngs_saying("1.13.3"))
+
     served = scratch / "served"
 
     def release(name, installer=takes, installer_by=release_key, sums_by=release_key, archive_bytes=archive, sums_for=archive,
@@ -120,6 +150,7 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     release("older-sums", sums_at=SIGNED_SINCE - 1)
     release("older-installer", installer_at=SIGNED_SINCE - 1)
     release("at-floor", installer_at=SIGNED_SINCE, sums_at=SIGNED_SINCE)
+    release("over", installer=replaces, archive_bytes=newer, sums_for=newer)
     (served / "empty").mkdir()
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Quiet, directory=str(served)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -164,6 +195,50 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     said, ran, given = get("ignores-from", "--link", INVITE)
     check("an installer that kept the invite's page for updates is said so, not called done",
           (said["ok"], "https://page.example/" in said["said"]), (False, True))
+
+    print("Get svrngs over an older svrngs, stopped, which the panel won't start")
+    home = Path(tempfile.mkdtemp(dir=scratch))
+    command = home / ".local/bin/svrngs"
+    command.parent.mkdir(parents=True)
+    command.write_bytes(svrngs_saying("1.12.2"))
+    command.chmod(0o755)
+    (home / ".svrngs").mkdir()
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        nothing = free.getsockname()[1]
+    (home / ".svrngs/api").write_text(f"http://127.0.0.1:{nothing}\n")
+    (home / ".svrngs/token").write_text("get-test-token-0123456789\n")
+    # svrngs's login service as install.sh keeps it, running ~/.local/bin/svrngs.
+    stubs = home / "stubs"
+    stubs.mkdir()
+    (stubs / "systemctl").write_text(
+        '#!/bin/sh\n[ "$*" = "--user show svrngs.service --property=LoadState,ExecStart,Environment" ] || exit 1\n'
+        'echo LoadState=loaded\n'
+        'echo "ExecStart={ path=$HOME/.local/bin/svrngs ; argv[]=$HOME/.local/bin/svrngs ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"\n'
+        'echo "Environment=SVRNGS_DIR=$HOME/.svrngs PATH=/usr/bin:/bin"\n')
+    (stubs / "systemctl").chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{stubs}:/usr/bin:/bin", "SVRNGS_FAM_SVRNGS": str(command),
+           "SVRNGS_FAM_RELEASES": f"http://127.0.0.1:{server.server_address[1]}/over"}
+
+    def helper(*args):
+        done = subprocess.run([str(plugin / "bin/svrngs-fam"), *args], capture_output=True, text=True, env=env, timeout=120)
+        return json.loads(done.stdout)
+
+    def says():
+        return subprocess.run([str(command), "version"], capture_output=True, text=True).stdout.strip()
+
+    restarts = lambda: (home / "restarts").read_text().splitlines() if (home / "restarts").exists() else []
+    before = helper("state")
+    check("before: stopped, and the panel won't start it, offering Get svrngs",
+          (before["svrngs"], before.get("get"), "is 1.12.2, older than 1.13.3" in before.get("older", "")), ("stopped", True, True))
+    check("and Start svrngs starts nothing", (helper("start")["ok"], restarts()), (False, []))
+    said = helper("get")
+    check("Get svrngs installs over it", (said["ok"], (home / "installed-archive").read_bytes() if (home / "installed-archive").exists() else None),
+          (True, newer))
+    check("the svrngs in ~/.local/bin is the release's now", says(), "svrngs 1.13.3 (0123abcd)")
+    after = helper("state")
+    check("after: stopped, and nothing keeps the panel from starting it", (after["svrngs"], after.get("older"), after.get("get")), ("stopped", None, None))
+    check("so Start svrngs starts it", (helper("start")["ok"], restarts()), (True, ["restart"]))
 
     print("anything else is never run")
     for name, why in (("tampered", "an installer changed after it was signed"),
