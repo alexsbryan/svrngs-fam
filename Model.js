@@ -21,6 +21,19 @@ function parse(raw) {
   return answer
 }
 
+// The helper's line saying it restarted svrngs to use an update replacing
+// it, as an answer carries it (`restarted`); "" when it didn't.
+function restartedOf(answer) {
+  return answer && typeof answer.restarted === "string" ? answer.restarted : ""
+}
+
+// What the panel says after an action: the helper's words, after that line
+// when svrngs restarted on the way.
+function replyWords(reply) {
+  var words = String(reply.said || (reply.ok ? "Done" : "That didn't work"))
+  return restartedOf(reply) !== "" ? restartedOf(reply) + "\n" + words : words
+}
+
 function stateOf(answer) {
   return answer ? answer.svrngs : "reading"
 }

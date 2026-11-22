@@ -157,6 +157,18 @@ ShellRoot {
       show("Traceback (most recent call last):")
       check("words that are not JSON are unreadable", fam.state, "unreadable")
 
+      console.log("svrngs restarted on the way to an answer, to use an update")
+      var restarted = "svrngs was updated, so it restarted to use the new one."
+      fam.said = ""
+      show({ svrngs: "running", groups: [], restarted: restarted })
+      check("a read says so, as no failure", JSON.stringify([fam.said, fam.saidOk]), JSON.stringify([restarted, true]))
+      show({ svrngs: "running", groups: [] })
+      check("and keeps saying it through the next read", fam.said, restarted)
+      check("an action says so before its own words, and only when it did",
+            JSON.stringify([Model.replyWords({ ok: true, said: "Opened in your browser", restarted: restarted }), Model.replyWords({ ok: false, said: "nope" })]),
+            JSON.stringify([restarted + "\nOpened in your browser", "nope"]))
+      fam.said = ""
+
       console.log("the panel's lists")
       show(running)
       check("groups you have left are not listed", JSON.stringify(barPanel.groups.map(function(g) { return g.name })), JSON.stringify(["WorkingGroup", "<b>Family</b>"]))

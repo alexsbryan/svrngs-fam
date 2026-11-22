@@ -55,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -113,6 +114,14 @@ class Unreadable(Exception):
 
 class Stopped(Exception):
     """Nothing listens at the address svrngs last kept."""
+
+
+class Older(Unreadable):
+    """What answers at svrngs's address has no proof route: an svrngs from
+    before 1.13.3, told NEWER."""
+
+    def __init__(self):
+        super().__init__(NEWER)
 
 
 def address(root):
@@ -207,7 +216,7 @@ def proved(conn, secret, port):
     """The socket of `conn`, just connected to svrngs's address, once what
     answers there has proved it holds `secret` on it (PROOF_OF), sent the
     challenge and nothing else. Refused as Unreadable, the token sent
-    nowhere: NEWER when svrngs has no such route, an svrngs before 1.13.3;
+    nowhere: Older when svrngs has no such route, an svrngs before 1.13.3;
     any other answer, a proof that isn't svrngs's for this connection
     among them; no answer within PROOF_WITHIN; and a connection that closes
     after the proof, which leaves none to send on."""
@@ -229,7 +238,7 @@ def proved(conn, secret, port):
         raise Unreadable(f"what listens at svrngs's address, port {port}, closed the connection before it showed it is your svrngs, "
                          "so the panel sent it nothing") from None
     if reply.status == 404:
-        raise Unreadable(NEWER)
+        raise Older()
     if reply.status != 200 or not hmac.compare_digest(shown_proof(raw), proof(secret, challenge, client, server)):
         raise Unreadable(other(port))
     # The answer read whole, and the connection still open: one whose
@@ -270,7 +279,33 @@ def dial(at, secret, timeout=TIMEOUT):
     then, a sandbox of this account's that can't read the token among them;
     what is sent with the token acts as this person everywhere. Stopped
     when nothing listens there; else Unreadable, the token sent nowhere,
-    until svrngs proves it."""
+    until svrngs proves it. An svrngs older than the one installed, as one
+    an update replaced keeps running until it restarts, is restarted once
+    (`renewed`), then waited for and asked again."""
+    try:
+        return connected_to(at, secret, timeout)
+    except Older:
+        if not renewed():
+            raise
+    began = time.monotonic()
+    while True:
+        try:
+            proven = connected_to(at, secret, timeout)
+        except Stopped:
+            # Not listening yet: svrngs binds its API first as it starts.
+            if time.monotonic() - began > PROOF_WITHIN:
+                raise
+            time.sleep(0.1)
+            continue
+        except Older:
+            raise Unreadable(f"svrngs was updated and restarted, but what answers at svrngs's address, port {at[1]}, still isn't "
+                             "the new svrngs, so the panel sent it nothing. svrngs can't start there until that program stops") from None
+        RESTART["proven"] = True
+        return proven
+
+
+def connected_to(at, secret, timeout):
+    """One connection to svrngs's address, proved on (`proved`)."""
     host, port = at
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
     conn.auto_open = 0
@@ -285,6 +320,54 @@ def dial(at, secret, timeout=TIMEOUT):
     except BaseException:
         conn.close()
         raise
+
+
+# Whether this run of the helper, one action of the panel's, has restarted
+# svrngs, which it does at most once, and been proved to after it. Held
+# under RESTARTING, since a read asks svrngs from several threads at once.
+RESTART = {"tried": False, "proven": False}
+RESTARTING = threading.Lock()
+RESTARTED = "svrngs was updated, so it restarted to use the new one."
+
+
+def renewed():
+    """Whether svrngs was restarted just now, as `svrngs restart` restarts
+    it (`run_svrngs`), because what answers at its address is older than
+    NEEDS and the svrngs installed here isn't (`installed`). An update
+    replaces svrngs's file while svrngs runs on, until it restarts (pacman's
+    svrngs-bin.install says to run `svrngs restart`). Not again in this run:
+    False once it was tried, as when the installed svrngs is older too, or
+    says no version. Unreadable when the restart was refused."""
+    with RESTARTING:
+        if RESTART["tried"]:
+            return False
+        RESTART["tried"] = True
+        version = installed()
+        if version is None or version < FLOOR:
+            return False
+        done = run_svrngs(["restart"])
+    if not done["ok"]:
+        raise Unreadable(f"the svrngs answering is older than the one installed here, and it couldn't be restarted: {done['said']}")
+    return True
+
+
+# A version as `svrngs version` prints it (svrngs cli.rs `Verb::Version`):
+# "svrngs 1.13.3 (<commit>)", or without the commit.
+VERSION = re.compile(r"svrngs (\d{1,5})\.(\d{1,5})\.(\d{1,5})(?: \([0-9a-f]{1,64}\))?")
+
+
+def installed():
+    """The version of the svrngs this helper runs (`svrngs_command`), as
+    (major, minor, patch), or None when there is none or it says none."""
+    command = svrngs_command()
+    if command is None:
+        return None
+    try:
+        done = subprocess.run([command, "version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    said = VERSION.fullmatch(done.stdout.strip()) if done.returncode == 0 else None
+    return tuple(int(n) for n in said.groups()) if said else None
 
 
 def request(at, secret, method, path, body=None, timeout=TIMEOUT):
@@ -720,6 +803,7 @@ def lends_of(at, secret, namespace):
 # that has no such route, and is told NEWER; Get svrngs installs none
 # signed before SIGNED_SINCE.
 NEEDS = "1.13.3"
+FLOOR = tuple(int(n) for n in NEEDS.split("."))
 NEWER = f"This needs svrngs {NEEDS} or later. Update svrngs on its home page, then try again."
 # When 2fe16c08 was committed, in seconds since 1970 (`git log -1
 # --format=%ct 2fe16c08` in svrngs). A release is signed after the commit
@@ -1311,11 +1395,16 @@ def process_of(rest):
 
 def main(argv):
     """The helper's one JSON answer to `argv`: a flag with no value after it
-    is refused, as any argument it can't take is."""
+    is refused, as any argument it can't take is. When this run restarted
+    svrngs and svrngs then proved itself (`renewed`), `restarted` says so,
+    for the panel to show."""
     try:
-        return answer(argv)
+        said = answer(argv)
     except Unasked as e:
-        return {"ok": False, "said": str(e)}
+        said = {"ok": False, "said": str(e)}
+    if RESTART["proven"]:
+        said["restarted"] = RESTARTED
+    return said
 
 
 def answer(argv):

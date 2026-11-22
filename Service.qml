@@ -131,6 +131,8 @@ Item {
     if (next.svrngs === "running" && !next.lends && answer && answer.svrngs === "running" && answer.lends)
       next.lends = answer.lends
     answer = next
+    // svrngs restarted to use an update on the way to this read: said once.
+    if (Model.restartedOf(next) !== "") tell(Model.restartedOf(next), true)
     // What listens on a lend's port changed since the last read of this
     // computer: svrngs is asked again, so a held lend's line, and the token
     // Keep sharing it sends, are svrngs's read of what answers now.
@@ -214,7 +216,7 @@ Item {
       var reply
       try { reply = JSON.parse(String(actionOut.text)) } catch (e) { reply = { ok: false, said: "The helper exited " + code + " without an answer" } }
       if (!reply || typeof reply !== "object") reply = { ok: false, said: "The helper's answer was not an answer" }
-      root.tell(String(reply.said || (reply.ok ? "Done" : "That didn't work")), reply.ok === true)
+      root.tell(Model.replyWords(reply), reply.ok === true)
       var key = root.doing
       root.doing = ""
       root.replied(key, reply)

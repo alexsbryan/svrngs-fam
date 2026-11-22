@@ -231,11 +231,29 @@ class Fake:
                     fake.playing.append((key, name))
                 return self.answer(200, fake.plays())
 
+        self.handler = Handler
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         serving = threading.Timer(serving_after, self.server.serve_forever)
         serving.daemon = True
         serving.start()
+
+    def renew(self, restarts, stopped):
+        """svrngs replaced by an update, then restarted: once `restarts`
+        appears, it stops listening, says so by `stopped`, as `systemctl
+        restart` returns once what it stopped has, and half a second later
+        listens at its port again as an svrngs that proves itself."""
+        def restarting():
+            while not restarts.exists():
+                time.sleep(0.02)
+            self.server.shutdown()
+            self.server.server_close()
+            stopped.touch()
+            time.sleep(0.5)
+            self.mode = "running"
+            self.server = ThreadingHTTPServer(("127.0.0.1", self.port), self.handler)
+            self.server.serve_forever()
+        threading.Thread(target=restarting, daemon=True).start()
 
     def plays(self):
         """What has Play on, each as svrngs play.rs `Playing` answers it: at

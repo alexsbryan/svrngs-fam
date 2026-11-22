@@ -10,7 +10,8 @@ groups share, from one icon.
 Nothing is lent until you say yes twice, and a share svrngs closes stays
 closed until you keep it to a program of yours. Your svrngs key stays on your
 computer. While its panel is closed, the plugin reads svrngs only when the
-bar starts and each time svrngs starts.
+bar starts and each time svrngs starts. If svrngs was updated but the old
+one is still running, the plugin restarts it once to use the new one.
 
 ![The svrngs panel, open on a group called House](preview.png)
 
