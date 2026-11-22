@@ -97,8 +97,13 @@ Panel {
   property string turningOn: ""
 
   // The keyboard's cursor: one stop per button, in the order they are drawn.
+  // It is on a stop by its name, so a read that adds or drops a line, every
+  // 5 s while the panel is open, moves it with its button, never onto
+  // another; where its button has gone, it is on none until a key moves it
+  // on from where it was (`cursorAt`).
   property bool cursorActive: false
-  property int cursor: 0
+  property string cursorStop: ""
+  property int cursorAt: 0
   readonly property var stops: {
     var out = []
     if (!isRunning) {
@@ -135,7 +140,7 @@ Panel {
     })
     return out
   }
-  readonly property string currentStop: cursorActive && stops.length > 0 ? stops[Math.min(cursor, stops.length - 1)] : ""
+  readonly property string currentStop: cursorActive && stops.indexOf(cursorStop) >= 0 ? cursorStop : ""
 
   property alias service: fam
 
@@ -159,8 +164,11 @@ Panel {
     }
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; keeping = ""; getting = false; getNameEdited = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
-  onQueryChanged: cursor = 0
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; keeping = ""; getting = false; getNameEdited = false; turningOn = ""; cursorActive = false; cursorStop = ""; cursorAt = 0; query = "" }
+  onQueryChanged: cursorOn(0)
+  // Where the cursor's button is now, kept for the keys to go on from if
+  // a later read drops it.
+  onStopsChanged: { var at = stops.indexOf(cursorStop); if (at >= 0) cursorAt = at }
 
   function expanded(id) {
     return finding || openGroup === id || groups.length === 1
@@ -172,14 +180,21 @@ Panel {
   }
 
   function moveCursor(dx, dy) {
-    if (!cursorActive) { cursorActive = true; cursor = 0; return }
-    cursor = Math.max(0, Math.min(stops.length - 1, cursor + (dy !== 0 ? dy : dx)))
+    if (!cursorActive) { cursorActive = true; cursorOn(0); return }
+    var at = stops.indexOf(cursorStop)
+    cursorOn(at >= 0 ? at + (dy !== 0 ? dy : dx) : cursorAt)
+  }
+
+  // The cursor on the stop at `at`, within the stops there are now.
+  function cursorOn(at) {
+    cursorAt = Math.max(0, Math.min(stops.length - 1, at))
+    cursorStop = stops.length > 0 ? stops[cursorAt] : ""
   }
 
   // Put the cursor on `stop` once it is drawn: a first press moves it to
   // its own second press.
   function cursorTo(stop) {
-    Qt.callLater(function() { var at = root.stops.indexOf(stop); if (at >= 0) root.cursor = at })
+    Qt.callLater(function() { var at = root.stops.indexOf(stop); if (at >= 0) root.cursorOn(at) })
   }
 
   function activate(stop) {
@@ -666,11 +681,11 @@ Panel {
             foreground: root.foreground
             placeholderText: strings.t("find.placeholder")
             onTextChanged: root.query = text
-            onAccepted: { root.cursorActive = true; root.cursor = 0; keyCatcher.forceActiveFocus() }
+            onAccepted: { root.cursorActive = true; root.cursorOn(0); keyCatcher.forceActiveFocus() }
             Keys.onPressed: function(event) {
               if (event.key === Qt.Key_Down) {
                 root.cursorActive = true
-                root.cursor = 0
+                root.cursorOn(0)
                 keyCatcher.forceActiveFocus()
                 event.accepted = true
               } else if (event.key === Qt.Key_Escape) {

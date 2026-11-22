@@ -667,6 +667,27 @@ ShellRoot {
       barPanel.moveCursor(0, 1)
       barPanel.activate(barPanel.currentStop)
       check("Cancel by keyboard lends nothing", [barPanel.lending, fam.doing].join("|"), "|")
+
+      console.log("a read that adds or drops a line moves the cursor with its button, never onto another")
+      barPanel.cursorActive = false
+      barPanel.moveCursor(0, 1)
+      barPanel.moveCursor(0, 1)
+      barPanel.moveCursor(0, 1)
+      check("the cursor on Copy address, two down from the first button", barPanel.currentStop, "copy:abc123")
+      var more = JSON.parse(JSON.stringify(running))
+      more.listeners = [{ port: 2999, program: "node", name: "client-x", pid: 3, start: 79 }].concat(running.listeners)
+      show(more)
+      check("a read adds an offer before it: the cursor stays on Copy address", barPanel.currentStop, "copy:abc123")
+      barPanel.activate(barPanel.currentStop)
+      check("so Enter presses Copy address, which asks first, and lends nothing", [fam.doing, barPanel.turningOn, barPanel.lending].join("|"), "|abc123|")
+      barPanel.turningOn = ""
+      var at = barPanel.stops.indexOf("copy:abc123")
+      fam.models = []
+      check("its button gone: the cursor is on none, so Enter presses nothing", barPanel.currentStop, "")
+      barPanel.moveCursor(0, 1)
+      check("and a key puts it back where it was", barPanel.currentStop, barPanel.stops[Math.min(at, barPanel.stops.length - 1)])
+      fam.models = [{ person: "Fedora", key: "kfedora", name: "coder", label: "abc123", address: "http://abc123.localhost:41097/v1", models: ["coder"] }]
+      show(running)
       barPanel.moveCursor(0, -99)
       barPanel.moveCursor(0, 99)
       check("the cursor stays within the buttons", barPanel.currentStop, "group:g2")
