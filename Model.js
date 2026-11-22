@@ -80,6 +80,27 @@ function wayOn(answer) {
   return ""
 }
 
+// The name a join with an invite link uses unless the person types
+// another, as the helper reads it by svrngs's own rule (its `joinAs`); ""
+// when svrngs would find none.
+function joinNameOf(answer) {
+  return answer && typeof answer.joinAs === "string" ? answer.joinAs : ""
+}
+
+// Whether an invite link joins a group: its token is after its `#`, and a
+// page's address alone joins nothing (svrngs web/install.sh:264-265).
+function joinsGroup(link) {
+  return String(link || "").trim().indexOf("#") >= 0
+}
+
+// The helper's argv for Get svrngs: with a link that joins a group, the
+// name to join it as.
+function getArgs(link, name) {
+  var given = String(link || "").trim()
+  if (given === "") return ["get"]
+  return ["get", "--link", given].concat(joinsGroup(given) ? ["--as", String(name || "").trim()] : [])
+}
+
 // The helper's words for why it won't start this svrngs; "" when none.
 function olderOf(answer) {
   return answer && typeof answer.older === "string" ? answer.older : ""

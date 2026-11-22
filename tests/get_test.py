@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import pwd
 import re
 import shutil
 import socket
@@ -82,11 +83,16 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     # updates from as svrngs's web/install.sh keeps it (`from`, written to
     # the data directory's `origin`, which svrngs's updater reads):
     # $SVRNGS_FROM, else the link's page.
-    keeps = 'from="${SVRNGS_FROM:-${1%%#*}}"\n'
-    takes = ('#!/bin/sh\n# install.sh <link> --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
-             'case "$2" in\n  --archive) cp "$3" "$HOME/installed-archive" ;;\nesac\n'
+    # With --as, it joins as svrngs join does, saying so as it says it
+    # (svrngs cli.rs `Said::Joined`), as install.sh passes what follows the
+    # link to `svrngs join` (web/install.sh:75, :264-268).
+    keeps = 'from="${SVRNGS_FROM:-${link%%#*}}"\n'
+    takes = ('#!/bin/sh\n# install.sh <link> [--as <name>] --archive <file>\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
+             'link=$1\nwhile [ $# -gt 0 ]; do\n  case "$1" in\n'
+             '    --archive) cp "$2" "$HOME/installed-archive"; shift ;;\n'
+             '    --as) printf "You\'re in WorkingGroup, as %s.\\n" "$2"; shift ;;\n  esac\n  shift\ndone\n'
              '{KEEPS}mkdir -p "$HOME/.svrngs" && printf "%s" "$from" > "$HOME/.svrngs/origin"\necho "svrngs runs now."\n')
-    ignores = takes.replace("{KEEPS}", 'from="${1%%#*}"\n')
+    ignores = takes.replace("{KEEPS}", 'from="${link%%#*}"\n')
     takes = takes.replace("{KEEPS}", keeps)
     old = '#!/bin/sh\n# fetches svrngs from the page\nprintf "%s\\n" "$@" > "$HOME/installed-with"\n'
     # An installer that says --archive, in a comment and a line it prints,
@@ -101,7 +107,7 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     # :232-236), after stopping the one its login service runs (`stopped`,
     # :130, :225), and starts the new one there (`keep`, :271-308).
     replaces = takes.replace('echo "svrngs runs now."\n',
-                             'tar -xzf "$3" -C "$HOME" svrngs && mkdir -p "$HOME/.local/bin" && mv -f "$HOME/svrngs" "$HOME/.local/bin/svrngs"\n'
+                             'tar -xzf "$HOME/installed-archive" -C "$HOME" svrngs && mkdir -p "$HOME/.local/bin" && mv -f "$HOME/svrngs" "$HOME/.local/bin/svrngs"\n'
                              'echo "Updated svrngs in $HOME/.local/bin."\n')
 
     def svrngs_saying(version):
@@ -157,14 +163,16 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
 
     homes = []
 
-    def get(name, *args, page=None):
+    def get(name, *args, page=None, user="svrngsfamtest", verb="get"):
         home = Path(tempfile.mkdtemp(dir=scratch))
         homes.append(home)
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "SVRNGS_FAM_SVRNGS": "",
                "SVRNGS_FAM_RELEASES": f"http://127.0.0.1:{server.server_address[1]}/{name}"}
+        if user is not None:
+            env["USER"] = user
         if page is not None:
             env["SVRNGS_FROM"] = page
-        done = subprocess.run([str(plugin / "bin/svrngs-fam"), "get", *args], capture_output=True, text=True, env=env, timeout=120)
+        done = subprocess.run([str(plugin / "bin/svrngs-fam"), verb, *args], capture_output=True, text=True, env=env, timeout=120)
         ran = home / "installed-with"
         given = home / "installed-archive"
         return (json.loads(done.stdout), ran.read_text().split("\n")[:-1] if ran.exists() else None,
@@ -184,9 +192,37 @@ with tempfile.TemporaryDirectory(prefix="svrngs-fam-get-test-") as directory:
     check("the installer is run for the page, given the archive", (ran or [None, None])[:2], [PAGE, "--archive"])
     check("the archive it is given is the release's, checked", given, archive)
     check("svrngs takes its updates from svrngs's own page", updates_from(), PAGE)
-    said, ran, given = get("good", "--link", INVITE)
-    check("with an invite link, the link is only what it joins", (ran or [None])[0], INVITE)
+    said, ran, given = get("good", "--link", INVITE, "--as", "Sam Q")
+    check("with an invite link, the link is only what it joins, as the name given", (ran or [None])[:3], [INVITE, "--as", "Sam Q"])
     check("and svrngs takes its updates from svrngs's own page, never the invite's", updates_from(), PAGE)
+    check("the join's own line is said back", (said["ok"], said["said"]),
+          (True, "You're in WorkingGroup, as Sam Q. svrngs is installed and running. Your home page opens in your browser."))
+
+    print("an invite link joins at once: under the name svrngs reads, or the one typed")
+    # A login no account here has: svrngs takes $USER itself then (cli.rs
+    # `user_name`, :2081-2092 at v1.13.3).
+    said, ran, given = get("good", "--link", INVITE, user="svrngsfamtest")
+    check("no name typed: $USER, where its account has no full name here", (ran or [None])[:3], [INVITE, "--as", "svrngsfamtest"])
+    # An account here whose full name is not its login, so the two are told
+    # apart; a computer with none can't show it, and fails here.
+    named = next(((a.pw_name, a.pw_gecos.split(",")[0].strip()) for a in pwd.getpwall()
+                  if a.pw_gecos.split(",")[0].strip() not in ("", a.pw_name) and len(a.pw_gecos.split(",")[0].strip().encode()) <= 64), None)
+    check("an account here whose full name isn't its login", named is not None, True)
+    login, full = named or ("", "")
+    said, ran, given = get("good", "--link", INVITE, user=login)
+    check("else the account's full name, its GECOS up to the first comma, as getent gives it", (ran or [None])[:3], [INVITE, "--as", full])
+    said, ran, given = get("good", "--link", INVITE, user=None)
+    check("no name typed, and no $USER: refused, nothing run", (said["ok"], said["said"], ran),
+          (False, "Say the name to join that group as, in 64 letters or fewer, so nothing was installed.", None))
+    said, ran, given = get("good", "--link", INVITE, "--as", "  ")
+    check("a name that is no name is refused, nothing run", (said["ok"], ran), (False, None))
+    said, ran, given = get("good", "--link", INVITE, "--as", "x" * 65)
+    check("nor one past 64 bytes", (said["ok"], ran), (False, None))
+    said, ran, given = get("good", "--link", "https://page.example/", "--as", "Sam Q")
+    check("a page's address with no token joins nothing: no name passed, and none said", (ran or [None])[:2] + [said["said"]],
+          ["https://page.example/", "--archive", "svrngs is installed and running. Your home page opens in your browser."])
+    said = get("empty", user="svrngsfamtest", verb="state")[0]
+    check("svrngs not here: the read names who a join would be", (said["svrngs"], said.get("joinAs")), ("not-installed", "svrngsfamtest"))
     said, ran, given = get("good", "--link", INVITE, page="https://mirror.example/svrngs")
     check("SVRNGS_FROM names another page to update from", (said["ok"], updates_from()), (True, "https://mirror.example/svrngs/"))
     for page in ("https://mirror.example/#x", "mirror.example", "ftp://mirror.example/", "https://mirror example/"):

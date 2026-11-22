@@ -689,15 +689,25 @@ ShellRoot {
       check("svrngs stopped keeps nothing of it", fam.answer.lends, undefined)
 
       console.log("no svrngs here: Get svrngs, a second press")
-      show({ svrngs: "not-installed" })
+      show({ svrngs: "not-installed", joinAs: "Cy Lab" })
       barPanel.cursorActive = true
       check("its one stop is Get svrngs", JSON.stringify(barPanel.stops), JSON.stringify(["get"]))
       barPanel.activate("get")
       check("the first press asks first", barPanel.getting, true)
       check("and runs nothing", fam.doing, "")
+      barPanel.getLink = "https://group.svrnme.sh/"
+      check("a page's address joins nothing, and asks no name", [barPanel.getJoins, JSON.stringify(Model.getArgs(barPanel.getLink, barPanel.joinName))].join("|"),
+            "false|" + JSON.stringify(["get", "--link", "https://group.svrnme.sh/"]))
       barPanel.getLink = "  https://group.svrnme.sh/#AbCdEf0123456789 "
+      check("an invite link joins its group, as the name svrngs would use, as the helper read it", [barPanel.getJoins, barPanel.joinName].join("|"), "true|Cy Lab")
+      barPanel.getName = ""
+      barPanel.getNameEdited = true
       barPanel.getSvrngs()
-      check("the second press runs the helper's get, with the link", JSON.stringify(fam.lastAsked), JSON.stringify(["get", "--link", "https://group.svrnme.sh/#AbCdEf0123456789"]))
+      check("with no name, Get svrngs runs nothing", fam.doing, "")
+      barPanel.getName = "Sam"
+      barPanel.getSvrngs()
+      check("the second press runs the helper's get, with the link and the name typed", JSON.stringify(fam.lastAsked),
+            JSON.stringify(["get", "--link", "https://group.svrnme.sh/#AbCdEf0123456789", "--as", "Sam"]))
       settle.then = harness.afterGet
       settle.start()
     }
@@ -727,6 +737,8 @@ ShellRoot {
       console.log("an svrngs older than the panel works with is never started from here")
       var words = "This svrngs is 1.12.2, older than 1.13.3, so the panel won't start it: its shares would open under older rules. Press Get svrngs to install the latest signed release."
       barPanel.getting = false
+      barPanel.getLink = ""
+      barPanel.getNameEdited = false
       show({ svrngs: "stopped", older: words, get: true })
       check("stopped and older: Get svrngs in Start svrngs's place", JSON.stringify([Model.wayOn(fam.answer), barPanel.stops]), JSON.stringify(["get", ["get"]]))
       barPanel.activate("get")
@@ -756,6 +768,18 @@ ShellRoot {
             meaning.indexOf("It replaces the older svrngs here, and keeps your groups and what you lend.") > 0, true)
       var confirm = withStop(content, "get:confirm")
       check("and its Get svrngs says it to a screen reader, as its description", confirm ? confirm.Accessible.description : "no such button", meaning)
+      var joins = "With this link, svrngs joins that group right away, as Cy Lab, before your home page opens. Everyone in the group sees that name."
+      check("with no link, nothing is said of joining", shownTexts(content).indexOf(joins), -1)
+      show({ svrngs: "stopped", older: words, get: true, joinAs: "Cy Lab" })
+      barPanel.getLink = "https://group.svrnme.sh/#AbCdEf0123456789"
+      shown = shownTexts(content)
+      check("with an invite link: before the press, that it joins at once, and as whom, the name shown to change",
+            [shown.indexOf(joins) >= 0, shown.indexOf("Your name there") >= 0, holding(content, "Cy Lab")].join(","), "true,true,true")
+      check("and Get svrngs says so to a screen reader too", confirm.Accessible.description, meaning + " " + joins)
+      barPanel.getName = " "
+      barPanel.getNameEdited = true
+      check("with the name emptied, Get svrngs can't be pressed", confirm.enabled, false)
+      barPanel.getLink = ""
       barPanel.close()
     }
 
@@ -811,6 +835,16 @@ ShellRoot {
     // The text drawn, and shown, under `item`.
     function shownTexts(item) {
       return texts(item, { seen: [], found: [] }).found.filter(function(t) { return t.visible }).map(function(t) { return t.text })
+    }
+
+    // Whether something shown under `item` holds the text `t`: a field's,
+    // which draws no Text of its own.
+    function holding(item, t) {
+      if (!item || !item.visible) return false
+      if (item.text === t) return true
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) if (holding(kids[i], t)) return true
+      return false
     }
 
     // The button under `item` that is the keyboard's stop `stop`, shown.

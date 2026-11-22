@@ -32,15 +32,19 @@ omarchy plugin add https://github.com/alexsbryan/svrngs-fam --enable
 
 Click the people icon in your bar. If svrngs isn't on your computer yet,
 or it's older than 1.13.3, press Get svrngs. If a friend sent you an invite
-link, paste it first. The plugin downloads svrngs and its installer from
-svrngs's latest release, checks both against the svrngs release key, and
-installs svrngs for you alone, with no password; an older svrngs in
-`~/.local/bin` is replaced, and your groups are kept. It puts svrngs in
-`~/.local/bin`, runs it as your user service (`systemctl --user`) whenever
-you log in, adds it to your applications menu, and adds `~/.local/bin` to
-your shell's startup file if your terminal doesn't look there yet. The
-invite link is used only to join your friend's group. Your browser then
-opens your home page, where you start a group or join theirs.
+link, paste it first: svrngs then joins your friend's group right away,
+before your home page opens, under the name the panel shows, which you can
+change. That name starts as your account's full name, else its login name,
+as svrngs reads it.
+
+The plugin downloads svrngs and its installer from svrngs's latest
+release, checks both against the svrngs release key, and installs svrngs
+for you alone, with no password; an older svrngs in `~/.local/bin` is
+replaced, and your groups are kept. It puts svrngs in `~/.local/bin`, runs
+it as your user service (`systemctl --user`) whenever you log in, adds it
+to your applications menu, and adds `~/.local/bin` to your shell's startup
+file if your terminal doesn't look there yet. The invite link is used only
+to join your friend's group. Your browser then opens your home page.
 
 svrngs then takes its updates from svrngs's own page,
 [group.svrnme.sh](https://group.svrnme.sh/), whatever page your invite

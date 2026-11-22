@@ -82,6 +82,12 @@ Panel {
   // Get svrngs waiting for its second press, and the invite link given, if any.
   property bool getting: false
   property string getLink: ""
+  // The name a join with that link uses: svrngs's own rule's, as the
+  // helper read it, until the person types another.
+  property string getName: ""
+  property bool getNameEdited: false
+  readonly property string joinName: getNameEdited ? getName : Model.joinNameOf(fam.answer)
+  readonly property bool getJoins: Model.joinsGroup(getLink)
   // The friend's model whose Copy address waits for its second press, by
   // its label: Play is off for it, so what turning Play on lets in is said
   // first, and nothing is turned on until Turn on and copy.
@@ -146,7 +152,7 @@ Panel {
     }
   }
 
-  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
+  onOpenedChanged: if (!opened) { lending = null; inviting = ""; getting = false; getNameEdited = false; turningOn = ""; cursorActive = false; cursor = 0; query = "" }
   onQueryChanged: cursor = 0
 
   function expanded(id) {
@@ -331,9 +337,11 @@ Panel {
 
   // svrngs's own installer, run by the helper once its signature verifies
   // against the svrngs release key; with an invite link, it joins that group.
+  // With a link that joins a group, it joins it at once, as the name shown,
+  // before the home page opens (svrngs web/install.sh:264-268).
   function getSvrngs() {
-    var link = getLink.trim()
-    if (fam.act("get", link === "" ? ["get"] : ["get", "--link", link])) getting = false
+    if (getJoins && joinName.trim() === "") return
+    if (fam.act("get", Model.getArgs(getLink, joinName))) getting = false
   }
 
   function startSvrngs() {
@@ -584,9 +592,35 @@ Panel {
                 onTextEdited: root.getLink = text
                 onAccepted: root.getSvrngs()
               }
+              // With a link, the join happens at once: said, and its name
+              // shown to change, before the press.
+              Row {
+                visible: root.getJoins
+                spacing: Style.space(8)
+                Note { text: strings.t("get.name"); width: implicitWidth; anchors.verticalCenter: parent.verticalCenter }
+                TextField {
+                  width: Style.space(200)
+                  text: root.joinName
+                  foreground: root.foreground
+                  onTextEdited: { root.getName = text; root.getNameEdited = true }
+                  onAccepted: root.getSvrngs()
+                }
+              }
+              Note {
+                id: getJoining
+                visible: root.getJoins
+                text: strings.t("get.joins").arg(root.joinName.trim() || "…")
+              }
               Row {
                 spacing: Style.space(8)
-                Act { doing: "get"; words: strings.t("action.get"); stop: "get:confirm"; Accessible.description: getMeaning.text; onClicked: root.getSvrngs() }
+                Act {
+                  doing: "get"
+                  words: strings.t("action.get")
+                  stop: "get:confirm"
+                  enabled: fam.doing === "" && (!root.getJoins || root.joinName.trim() !== "")
+                  Accessible.description: getMeaning.text + (root.getJoins ? " " + getJoining.text : "")
+                  onClicked: root.getSvrngs()
+                }
                 Act { words: strings.t("action.cancel"); stop: "get:cancel"; onClicked: root.getting = false }
               }
             }

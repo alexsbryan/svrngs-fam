@@ -37,10 +37,13 @@ Verbs:
   start                           starts svrngs again, as svrngs restart does,
                                   unless it is older than svrngs 1.13.3
                                   (`behind`)
-  get [--link <invite link>]      installs svrngs with its own installer, once
+  get [--link <invite link> [--as <name>]]
+                                  installs svrngs with its own installer, once
                                   the installer's signature verifies against
                                   the svrngs release key in ../keys, made no
-                                  earlier than svrngs 1.13.3's (SIGNED_SINCE)
+                                  earlier than svrngs 1.13.3's (SIGNED_SINCE);
+                                  with a link, it joins that group at once, as
+                                  <name>, else as svrngs names you (`join_name`)
 
 It reads svrngs's public surface only: the `svrngs` command, the `api` and
 `token` files in svrngs's data directory, and the `/v1/` routes it asks
@@ -67,6 +70,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -891,7 +895,7 @@ def state(full):
             report["svrngs"] = "not-installed" if not report["command"] else "never-started"
             if report["command"]:
                 stopped_here(report, "use it")
-            return report
+            return offers_get(report)
         report["mine"] = own_lends(root)
         secret = token(root)
         held = ask(at, secret, "GET", "/v1/groups")
@@ -940,7 +944,40 @@ def state(full):
     except Unreadable as e:
         report["svrngs"] = "unreadable"
         report["reason"] = str(e)
+    return offers_get(report)
+
+
+def offers_get(report):
+    """`report`, where the panel offers Get svrngs, with the name a join
+    with an invite link uses unless the person types another (`joinAs`),
+    "" when svrngs would find none."""
+    if report["svrngs"] == "not-installed" or report.get("get"):
+        report["joinAs"] = join_name() or ""
     return report
+
+
+def join_name():
+    """The name svrngs joins a group under when it is told none (svrngs
+    crates/svrngs/src/cli.rs `user_name`, `full_name`, :2081-2114 at
+    v1.13.3): the full name of the account $USER names, its GECOS up to the
+    first comma as `getent passwd` gives it, if that is a name (`as_name`),
+    else $USER; None when neither is."""
+    user = os.environ.get("USER", "")
+    try:
+        full = pwd.getpwnam(user).pw_gecos.split(",")[0] if user else ""
+    except KeyError:
+        full = ""
+    return as_name(full) or as_name(user)
+
+
+def as_name(raw):
+    """`raw` as svrngs takes a person's name (svrngs-core lib.rs
+    `Name::parse`): trimmed, 1 to 64 bytes, no control character; else
+    None."""
+    name = (raw or "").strip()
+    if not name or len(name.encode()) > 64 or any(unicodedata.category(c) == "Cc" for c in name):
+        return None
+    return name
 
 
 def stopped_here(report, doing):
@@ -1685,7 +1722,7 @@ def update_page():
     return page if page.endswith("/") else page + "/"
 
 
-def get_svrngs(link):
+def get_svrngs(link, name=None):
     """svrngs installed by its own installer, for this person alone, without
     root, then their home page opens (svrngs web/install.sh). Everything
     comes from one svrngs release and is checked before anything runs: the
@@ -1698,11 +1735,21 @@ def get_svrngs(link):
     updates from (`update_page`), SVRNGS_FROM, which it keeps over the
     link's (install.sh `from`), so the invite never says what svrngs
     becomes either. What it kept is read back after, and said if it
-    isn't that page."""
+    isn't that page. With a link, the installer joins that group before
+    anything else opens (install.sh:264-268), as `name`, which it hands to
+    `svrngs join` as --as (what follows the link, install.sh:75), else as
+    svrngs names this person (`join_name`); the join's own line is said
+    back (`joined`)."""
     if link is not None and link.lower().startswith("svrngs:"):
         return {"ok": False, "said": CLIENT_LINK}
     if link is not None and not LINK.fullmatch(link):
         return {"ok": False, "said": "That doesn't look like a svrngs invite link. Paste the whole link your friend sent."}
+    # A link's token is after its `#`; a page's address alone joins nothing
+    # (install.sh:264-265).
+    joins = link is not None and "#" in link
+    joining = as_name(name if name is not None else join_name()) if joins else None
+    if joins and joining is None:
+        return {"ok": False, "said": "Say the name to join that group as, in 64 letters or fewer, so nothing was installed."}
     page = update_page()
     if page is None:
         said = text(os.environ.get("SVRNGS_FROM", "").strip())
@@ -1745,7 +1792,8 @@ def get_svrngs(link):
         archive = home / archive_name
         archive.write_bytes(files[archive_name])
         try:
-            done = subprocess.run(["sh", str(home / "install.sh"), link or page, "--archive", str(archive)],
+            named = ["--as", joining] if joins else []
+            done = subprocess.run(["sh", str(home / "install.sh"), link or page, *named, "--archive", str(archive)],
                                   env={**os.environ, "SVRNGS_FROM": page},
                                   stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
         except subprocess.TimeoutExpired:
@@ -1761,7 +1809,22 @@ def get_svrngs(link):
         return {"ok": False, "said": f"svrngs is installed and running, but which page it takes its updates from can't be read: {e.strerror}."}
     if kept.rstrip("/") != page.rstrip("/"):
         return {"ok": False, "said": f"svrngs is installed and running, but it takes its updates from {text(kept)}, not {page}. Its installer didn't keep the page it was given."}
-    return {"ok": True, "said": "svrngs is installed and running. Your home page opens in your browser."}
+    if not joins:
+        return {"ok": True, "said": "svrngs is installed and running. Your home page opens in your browser."}
+    line = joined(done.stdout + done.stderr)
+    if line is None:
+        return {"ok": True, "said": "svrngs is installed and running, and its installer said nothing of the group your link is for: your home page says whether you're in it."}
+    return {"ok": True, "said": f"{line} svrngs is installed and running. Your home page opens in your browser."}
+
+
+# What `svrngs join` prints once in, as svrngs says it (svrngs cli.rs
+# `Said::Joined` and `Said::AlreadyIn`, :1513-1518 at v1.13.3).
+JOINED = re.compile(r"You're in .{1,200}, as .{1,64}\.|You're in .{1,200} already, on this computer\.")
+
+
+def joined(said):
+    """The join's own line in what svrngs's installer said, or None."""
+    return next((text(l.strip()) for l in said.splitlines() if JOINED.fullmatch(l.strip())), None)
 
 
 def sums_of(listing):
@@ -1876,7 +1939,7 @@ def answer(argv):
         return start()
     if verb == "get":
         link = value(rest, "--link")
-        return get_svrngs(link.strip() if link else None)
+        return get_svrngs(link.strip() if link else None, value(rest, "--as"))
     return {"ok": False, "said": f"unknown verb or arguments: {text(' '.join(argv))}"}
 
 
