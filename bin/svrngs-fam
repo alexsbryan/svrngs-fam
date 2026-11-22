@@ -1263,7 +1263,8 @@ def play(key, name, off):
     address is the lend's own on this computer (`lend_at`); else it is
     turned off again (`turned_off`), so a Copy address that fails leaves
     nothing on. Never turned on for a lend its lender lends as a port
-    (`lent_as`, RAW_PLAY). An svrngs whose Play opens no lend at an address,
+    (`lent_as`, RAW_PLAY), nor for one no group's answer lists, whose way
+    is unsaid (UNSAID_PLAY). An svrngs whose Play opens no lend at an address,
     1.13.2 and before, has no proof route either, and is told to update
     (NEWER) before it is asked (`proved`)."""
     held, refused = connected()
@@ -1271,7 +1272,12 @@ def play(key, name, off):
         return refused
     at, secret = held
     try:
-        if not off and (lent_as(at, secret, key, name) or {}).get("raw"):
+        row = None if off else lent_as(at, secret, key, name)
+        # svrngs asks how a lend is lent by its own read (play.rs `turn`);
+        # where the helper's finds none to say, Play stays off.
+        if not off and row is None:
+            return {"ok": False, "said": UNSAID_PLAY.format(name=name)}
+        if not off and row.get("raw"):
             return {"ok": False, "said": RAW_PLAY.format(name=name)}
         status, answer = request(at, secret, "POST", "/v1/play", {"off" if off else "on": {"key": key, "name": name}})
     except Stopped:
@@ -1298,6 +1304,12 @@ def play(key, name, off):
 # Play say the latter, so it turns on Play for no port.
 RAW_PLAY = ("{name} is lent as a port, so the panel doesn't turn on Play for it: Play on a port lets in any program on this computer, "
             "another account's too. Your home page offers it, and says so.")
+
+
+# What `play` says where no group's answer lists the lend (`lent_as`): its
+# lender's computer away, a group's lends unread, or the lend gone.
+UNSAID_PLAY = ("svrngs can't say how {name} is lent to this computer now, so Play wasn't turned on. "
+               "Its lender's computer may be off: try again in a moment.")
 
 
 def lent_as(at, secret, key, name):

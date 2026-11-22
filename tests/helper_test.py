@@ -1249,8 +1249,17 @@ check("a lend lent as a port: Play isn't turned on, saying why", (got["ok"], got
 got, _ = run(home, "models")
 check("and it is never listed as a model to copy, whatever it answers", [l["name"] for l in got["lends"]], ["coder"])
 fake.opens = {}
+UNSAID = ("svrngs can't say how {} is lent to this computer now, so Play wasn't turned on. "
+          "Its lender's computer may be off: try again in a moment.")
+turned = len(played())
 got, _ = run(home, "play", FEDORA, "garden")
-check("a lend not lent to this computer: svrngs's words", (got["ok"], got["said"]), (False, "garden is not lent to this computer now"))
+check("a lend no group's answer lists: Play isn't turned on, saying why", (got["ok"], got["said"], len(played()) - turned),
+      (False, UNSAID.format("garden"), 0))
+fake.lends_fail = True
+got, _ = run(home, "play", FEDORA, "coder")
+check("nor where a group's lends can't be read, though svrngs's own read might find it", (got["ok"], got["said"], len(played()) - turned, fake.playing),
+      (False, UNSAID.format("coder"), 0, []))
+fake.lends_fail = False
 got, _ = run(home, "play", FEDORA, "coder", "--off")
 check("Stop turns it off", (got["ok"], played()[-1][1], fake.playing), (True, {"off": {"key": FEDORA, "name": "coder"}}, []))
 (home / "clipboard").unlink(missing_ok=True)

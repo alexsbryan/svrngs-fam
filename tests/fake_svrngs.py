@@ -114,6 +114,8 @@ class Fake:
         # name), in order; `room_fails` answers its route 500.
         self.room = []
         self.room_fails = False
+        # /v1/lends answered 500, as a group whose lends can't be read now.
+        self.lends_fail = False
         fake = self
         connections = itertools.count(1)
 
@@ -188,6 +190,8 @@ class Fake:
                     return self.answer(200, fake.plays())
                 if self.path == "/v1/room":
                     return self.answer(500, {"error": "the room cannot be read"}) if fake.room_fails else self.answer(200, fake.rooms())
+                if self.path.startswith("/v1/lends?namespace=") and fake.lends_fail:
+                    return self.answer(500, {"error": "the group's lends could not be read"})
                 if self.path.startswith("/v1/lends?namespace=") and fake.delay:
                     time.sleep(fake.delay)
                 if self.path.startswith("/v1/lends?namespace="):
