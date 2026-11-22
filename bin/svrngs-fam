@@ -54,6 +54,7 @@ import pwd
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -175,7 +176,8 @@ def ask(at, secret, method, path, body=None, timeout=TIMEOUT):
 #   whatever reads it has nothing to use anywhere else.
 PROOF_OF = "svrngs proof v1"
 ASK_OF = "svrngs ask v1"
-# How long, in seconds, the helper waits for svrngs's proof. svrngs listens
+# How long, in seconds, the helper waits for svrngs's proof, the whole of
+# it however its bytes come (`Deadline`). svrngs listens
 # before it answers while it starts: node.rs `start_on` binds its API
 # (api.rs `bind`), then builds the rest before it serves, and a connection
 # made meanwhile waits for it. Nothing without the token can prove itself,
@@ -229,6 +231,33 @@ def other(port):
             "svrngs can't start there until that program stops")
 
 
+class Deadline(socket.socket):
+    """A connection's socket that one exchange on it can be held to a
+    deadline on: while `by`, a time.monotonic() instant, is set, each read
+    waits only for what is left until then, so what sends a byte at a time
+    can't keep the helper waiting past it, as a timeout for each read
+    would. http.client reads an answer through `recv_into` alone
+    (socket.SocketIO.readinto)."""
+
+    by = None
+
+    @classmethod
+    def of(cls, sock):
+        """`sock`'s connection, as a Deadline, with its timeout."""
+        timeout = sock.gettimeout()
+        held = cls(fileno=sock.detach())
+        held.settimeout(timeout)
+        return held
+
+    def recv_into(self, buffer, nbytes=0, flags=0):
+        if self.by is not None:
+            left = self.by - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("the deadline has passed")
+            self.settimeout(left)
+        return super().recv_into(buffer, nbytes, flags)
+
+
 def proved(conn, secret, port):
     """The socket of `conn`, just connected to svrngs's address, and the
     code to ask on it with (`ask_for`), once what answers there has proved
@@ -236,7 +265,8 @@ def proved(conn, secret, port):
     Refused as Unreadable, nothing more sent: Older when svrngs has no such
     route, an svrngs before 1.13.3; NEWER when it proves itself and gives
     no nonce, a build before it; any other answer, a proof that isn't
-    svrngs's for this connection among them; no answer within PROOF_WITHIN;
+    svrngs's for this connection among them; no whole answer within
+    PROOF_WITHIN;
     and a connection that closes after the proof, which leaves none to send
     on."""
     sock = conn.sock
@@ -244,7 +274,9 @@ def proved(conn, secret, port):
     # end the helper reached is svrngs's own.
     client, server = end(sock.getsockname()), end(sock.getpeername())
     challenge = secrets.token_bytes(32).hex()
+    # One deadline for the challenge sent, the answer's head and its body.
     sock.settimeout(PROOF_WITHIN)
+    sock.by = time.monotonic() + PROOF_WITHIN
     try:
         conn.request("POST", "/v1/proof", body=json.dumps({"challenge": challenge}).encode(),
                      headers={"Content-Type": "application/json"})
@@ -256,6 +288,8 @@ def proved(conn, secret, port):
     except (OSError, http.client.HTTPException):
         raise Unreadable(f"what listens at svrngs's address, port {port}, closed the connection before it showed it is your svrngs, "
                          "so the panel sent it none of your token") from None
+    finally:
+        sock.by = None
     if reply.status == 404:
         raise Older()
     shown, nonce = shown_proof(raw)
@@ -336,6 +370,7 @@ def connected_to(at, secret, timeout):
         raise Stopped() from None
     except OSError as e:
         raise Unreadable(f"svrngs's address did not answer: {e}") from None
+    conn.sock = Deadline.of(conn.sock)
     try:
         return Proven(conn, proved(conn, secret, port), timeout)
     except BaseException:

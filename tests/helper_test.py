@@ -703,6 +703,56 @@ waiting.close()
 check("unreadable once PROOF_WITHIN has passed, saying so", (said is not None and "didn't show it is your svrngs" in said, 0.3 <= waited < 3),
       (True, True))
 
+
+def dribbled(listener, after):
+    """One connection to `listener` answered as svrngs answers a challenge,
+    whole and in its shape, its proof made with the token and a nonce in
+    it, a byte every 20 ms; what else it is sent, kept in `after`."""
+    c = listener.accept()[0]
+    with c:
+        got = b""
+        while b"\r\n\r\n" not in got:
+            got += c.recv(65536)
+        head, _, body = got.partition(b"\r\n\r\n")
+        length = int(re.search(rb"(?i)\r\ncontent-length: *(\d+)", head)[1])
+        while len(body) < length:
+            body += c.recv(65536)
+        shown = fake_proof(TOKEN, json.loads(body)["challenge"], helper.end(c.getpeername()), helper.end(c.getsockname()))
+        said = json.dumps({"proof": shown, "nonce": "11" * 32}).encode()
+        answer = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(said), said)
+        try:
+            for i in range(len(answer)):
+                c.sendall(answer[i:i + 1])
+                time.sleep(0.02)
+            c.settimeout(1)
+            while more := c.recv(65536):
+                after.append(more)
+        except OSError:
+            pass
+
+
+case("what proves at svrngs's address a byte at a time, too slowly to finish within PROOF_WITHIN, is asked nothing")
+slow = socket.socket()
+slow.bind(("127.0.0.1", 0))
+slow.listen()
+after = []
+dribbling = threading.Thread(target=dribbled, args=(slow, after), daemon=True)
+dribbling.start()
+helper = helper_module()
+helper.PROOF_WITHIN = 0.3
+began = time.monotonic()
+try:
+    helper.request(slow.getsockname(), TOKEN, "GET", "/v1/groups")
+    said = None
+except helper.Unreadable as e:
+    said = str(e)
+waited = time.monotonic() - began
+dribbling.join(10)
+slow.close()
+check("unreadable once PROOF_WITHIN has passed in all, though a byte came well within it each time",
+      (said is not None and "didn't show it is your svrngs" in said, 0.3 <= waited < 1.5), (True, True))
+check("and nothing asked of it after its proof", after, [])
+
 ACTIONS = (("approve", ("approve", "garden", "--token", "0f" * 32, "--pid", "4242@987654")),
            ("open", ("open",)), ("models", ("models",)), ("play", ("play", "d" * 64, "coder")))
 RESTARTED = "svrngs was updated, so it restarted to use the new one."
