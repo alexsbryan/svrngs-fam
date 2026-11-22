@@ -1219,14 +1219,33 @@ check("copy, while Play is on: the address svrngs answered is copied, and svrngs
        [s["path"] for s in fake.seen[-2:]]),
       (True, f"http://model1.localhost:{fake.port}/v1", f"http://model1.localhost:{fake.port}/v1", 0, ["/v1/proof", "/v1/play"]))
 (home / "clipboard").unlink(missing_ok=True)
+run(home, "play", FEDORA, "coder", "--off")
 fake.opens = {(FEDORA, "coder"): {"is": "apart"}}
 got, _ = run(home, "play", FEDORA, "coder")
-check("closed where Play opened it: svrngs's words, and nothing copied", (got["ok"], got["said"], (home / "clipboard").exists()),
-      (False, "Closed: you and its lender are in no group together now.", False))
-check("and a full read says so", [p["open"] for p in state(home, "--full")["play"]], ["apart"])
+check("closed where Play opened it: svrngs's words, nothing copied, and Play turned off again, saying so",
+      (got["ok"], got["said"], (home / "clipboard").exists(), played()[-1][1], fake.playing),
+      (False, "Closed: you and its lender are in no group together now. Play was turned off again.", False,
+       {"off": {"key": FEDORA, "name": "coder"}}, []))
+check("and a full read lists no Play", state(home, "--full")["play"], [])
 fake.opens = {(FEDORA, "coder"): {"at": "http://model1.localhost:1/"}}
 got, _ = run(home, "play", FEDORA, "coder")
-check("open at an address that isn't its lend's here: nothing copied", (got["ok"], (home / "clipboard").exists()), (False, False))
+check("open at an address that isn't its lend's here: nothing copied, and Play turned off again",
+      (got["ok"], (home / "clipboard").exists(), played()[-1][1], fake.playing), (False, False, {"off": {"key": FEDORA, "name": "coder"}}, []))
+fake.opens = {}
+# A lend its lender lends as a port (svrngs lend.rs `Offered`'s `raw`):
+# Play would open it at 127.0.0.1:<port> to every account here.
+fake.lends = {"lent": [*fake.lends["lent"], {"person": "Fedora", "key": FEDORA, "name": "game", "kind": "factorio",
+                                             "origin": f"http://model2.localhost:{fake.port}/", "raw": "tcp"}]}
+fake.playable[(FEDORA, "game")] = "model2"
+fake.opens = {(FEDORA, "game"): {"at": "127.0.0.1:41234"}}
+fake.models["model2"] = ["qwen3-coder"]
+turned = len(played())
+got, _ = run(home, "play", FEDORA, "game")
+check("a lend lent as a port: Play isn't turned on, saying why", (got["ok"], got["said"], len(played()) - turned, fake.playing),
+      (False, "game is lent as a port, so the panel doesn't turn on Play for it: Play on a port lets in any program on this computer, "
+              "another account's too. Your home page offers it, and says so.", 0, []))
+got, _ = run(home, "models")
+check("and it is never listed as a model to copy, whatever it answers", [l["name"] for l in got["lends"]], ["coder"])
 fake.opens = {}
 got, _ = run(home, "play", FEDORA, "garden")
 check("a lend not lent to this computer: svrngs's words", (got["ok"], got["said"]), (False, "garden is not lent to this computer now"))

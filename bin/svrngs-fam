@@ -1208,14 +1208,19 @@ def play(key, name, off):
     unread (play.rs `shown`); so an app is never given svrngs's token.
     Turned on, the address svrngs answers is copied with v1 on its end, as
     an OpenAI-compatible app takes it, only if it is open there and that
-    address is the lend's own on this computer (`lend_at`). An svrngs whose
-    Play opens no lend at an address, 1.13.2 and before, has no proof route
-    either, and is told to update (NEWER) before it is asked (`proved`)."""
+    address is the lend's own on this computer (`lend_at`); else it is
+    turned off again (`turned_off`), so a Copy address that fails leaves
+    nothing on. Never turned on for a lend its lender lends as a port
+    (`lent_as`, RAW_PLAY). An svrngs whose Play opens no lend at an address,
+    1.13.2 and before, has no proof route either, and is told to update
+    (NEWER) before it is asked (`proved`)."""
     held, refused = connected()
     if refused:
         return refused
     at, secret = held
     try:
+        if not off and (lent_as(at, secret, key, name) or {}).get("raw"):
+            return {"ok": False, "said": RAW_PLAY.format(name=name)}
         status, answer = request(at, secret, "POST", "/v1/play", {"off" if off else "on": {"key": key, "name": name}})
     except Stopped:
         return {"ok": False, "said": "svrngs isn't running"}
@@ -1229,7 +1234,57 @@ def play(key, name, off):
         if row is not None:
             return {"ok": False, "said": f"svrngs still has Play on for {name}"}
         return {"ok": True, "said": f"Play is off for {name}."}
-    return copied(row, name, at[1])
+    done = copied(row, name, at[1])
+    return done if done["ok"] else turned_off(at, secret, key, name, done)
+
+
+# Play on a lend its lender lends as a port opens it at 127.0.0.1:<port>,
+# where svrngs carries every connection, whatever account's program makes
+# it (svrngs crates/svrngs-node/src/play.rs:19-22, :209-215;
+# door/tcp.rs:87-97 at v1.13.3), unlike a lend at an address, which lets
+# in this account's programs alone (play.rs:289-298). The panel's words for
+# Play say the latter, so it turns on Play for no port.
+RAW_PLAY = ("{name} is lent as a port, so the panel doesn't turn on Play for it: Play on a port lets in any program on this computer, "
+            "another account's too. Your home page offers it, and says so.")
+
+
+def lent_as(at, secret, key, name):
+    """The row svrngs lists for the lend `name` of the computer whose key is
+    `key`, in any group this computer is in (GET /v1/lends, each asked
+    together, as `state` asks them), saying how it is lent now: as a port
+    (`raw`, svrngs lend.rs `Offered`) or at an address. None when no group's
+    answer lists it; what keeps svrngs from being asked at all is raised,
+    as `request` raises it."""
+    holding = ask(at, secret, "GET", "/v1/groups")
+    ids = [g.get("id") for g in rows(holding.get("groups"))[0] if isinstance(g, dict) and not g.get("left")]
+
+    def lent_in(namespace):
+        try:
+            return rows(ask(at, secret, "GET", f"/v1/lends?namespace={namespace}", timeout=LENDS_TIMEOUT).get("lent"))[0]
+        except (Stopped, Unreadable):
+            return []
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for lent in pool.map(lent_in, ids):
+            for l in lent:
+                if isinstance(l, dict) and l.get("key") == key and l.get("name") == name:
+                    return l
+    return None
+
+
+def turned_off(at, secret, key, name, failed):
+    """`failed`, what a Copy address that turned Play on and copied nothing
+    said, with Play for that lend turned off again and said so; or, where
+    svrngs still lists it on, or couldn't be asked, the way to stop it."""
+    try:
+        status, answer = request(at, secret, "POST", "/v1/play", {"off": {"key": key, "name": name}})
+        still = status != 200 or not isinstance(answer, list) or played(answer, key, name) is not None
+    except (Stopped, Unreadable):
+        still = True
+    said = failed["said"].rstrip(".")
+    if still:
+        return {"ok": False, "said": f"{said}. Play may still be on for {name}: press Stop on your home page."}
+    return {"ok": False, "said": f"{said}. Play was turned off again."}
 
 
 def played(answer, key, name):
@@ -1253,7 +1308,7 @@ def copied(row, name, port):
         return {"ok": False, "said": f"svrngs opened {name} somewhere other than its address on this computer, so nothing was copied"}
     copier = shutil.which("wl-copy")
     if copier is None:
-        return {"ok": False, "said": f"Play is on for {name}, but wl-copy isn't installed, so its address wasn't copied: {address}v1"}
+        return {"ok": False, "said": f"wl-copy isn't installed, so {name}'s address, {address}v1, wasn't copied"}
     subprocess.run([copier], input=address + "v1", text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
     return {"ok": True, "at": address, "address": address + "v1", "said": f"Copied {address}v1."}
 
@@ -1377,8 +1432,10 @@ def models(skip=frozenset()):
             continue
         for l in lent:
             # Not asked: this computer's own, by its key, or one its lender
-            # says is not running, or holds closed.
-            if not isinstance(l, dict) or me is not None and key_of(l.get("key")) == me or l.get("answering") is False or held_of(l.get("held")):
+            # says is not running, or holds closed, or lends as a port,
+            # which Play opens to every account here (RAW_PLAY).
+            if (not isinstance(l, dict) or me is not None and key_of(l.get("key")) == me or l.get("answering") is False
+                    or held_of(l.get("held")) or l.get("raw")):
                 continue
             label = lend_at(l.get("origin"), at[1])
             if label and label not in candidates and key_of(l.get("key")):
