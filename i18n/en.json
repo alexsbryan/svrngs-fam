@@ -63,6 +63,7 @@
   "keep.question": "Keep sharing %1 with %2?",
   "keep.meaning": "Now answering: %1. Everyone in %2 can open it as themselves, while this computer is on.",
   "keep.nobody": "no group now",
+  "keep.changed": "What answers on %1's port changed after you pressed Keep sharing it, so nothing was approved. Press Keep sharing it again to see what answers now.",
   "action.invite": "Invite",
   "action.makeLink": "Make link",
   "invite.question": "Anyone with a new link can join %1 for a day, while this computer is on. It stops the last link you made here letting new people in; links others made still work, and everyone already in stays.",

@@ -226,7 +226,25 @@ function keepable(l) {
 // approves that only while it is still what answers, every socket there
 // that process's, and changes nothing else.
 function approveArgs(l) {
-  return ["approve", l.name, "--token", l.token, "--pid", processOf(l.now)]
+  return approveShown(l.name, shownOf(l))
+}
+
+// What a held lend's line shows answering, as Keep sharing it's first press
+// keeps it: the token its row was listed with, the process, and the words
+// for it. The second press approves that and nothing else (`stillShows`).
+function shownOf(l) {
+  return { token: l.token, pid: l.now.pid, start: l.now.start, said: l.now.said }
+}
+
+// Whether `l`'s line shows what `shown` was: the same token and the same
+// process. A later read that shows another is a new question.
+function stillShows(l, shown) {
+  return keepable(l) && l.token === shown.token && l.now.pid === shown.pid && l.now.start === shown.start
+}
+
+// The helper's argv to keep sharing the lend `name` to what `shown` was.
+function approveShown(name, shown) {
+  return ["approve", name, "--token", shown.token, "--pid", processOf(shown)]
 }
 
 // What listens on each of this computer's lends' ports, by the helper's own

@@ -82,6 +82,9 @@ Panel {
   // The lend of yours whose Keep sharing it waits for its second press, by
   // its name: which groups it goes to, and what answers there, said first.
   property string keeping: ""
+  // What its first press showed answering, which is all the second press
+  // approves (Model.js `shownOf`).
+  property var keepShown: null
   // Get svrngs waiting for its second press, and the invite link given, if any.
   property bool getting: false
   property string getLink: ""
@@ -292,6 +295,7 @@ Panel {
     inviting = ""
     turningOn = ""
     keeping = l.name
+    keepShown = Model.shownOf(l)
     cursorTo("keepok:" + l.name)
   }
 
@@ -299,15 +303,24 @@ Panel {
   // answering, the process svrngs read for its row, sent with the token the
   // row was listed with (svrngs share.rs `approve`), for every group it
   // goes to.
+  // Only what the first press showed is approved: a read since that shows
+  // another program there approves nothing, and says so.
   function keepSharing(l) {
-    if (Model.keepable(l) && keeping === l.name && fam.act("keep:" + l.name, Model.approveArgs(l))) keeping = ""
+    if (!l || keeping !== l.name || keepShown === null) return
+    if (!Model.stillShows(l, keepShown)) {
+      keeping = ""
+      fam.tell(strings.t("keep.changed").arg(l.name), false)
+      return
+    }
+    if (fam.act("keep:" + l.name, Model.approveShown(l.name, keepShown))) keeping = ""
   }
 
   // What Keep sharing it's second press says: [the question, what it lets
   // in], naming each group the share goes to.
   function keepWords(l) {
     var to = l.groups.length > 0 ? l.groups.join(", ") : strings.t("keep.nobody")
-    return [strings.t("keep.question").arg(l.name).arg(to), strings.t("keep.meaning").arg(l.now ? l.now.said : "").arg(to)]
+    var said = keeping === l.name && keepShown !== null ? keepShown.said : l.now ? l.now.said : ""
+    return [strings.t("keep.question").arg(l.name).arg(to), strings.t("keep.meaning").arg(said).arg(to)]
   }
 
   // A lend of yours, in a word: that svrngs doesn't list it, so lends it to

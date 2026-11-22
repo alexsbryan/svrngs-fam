@@ -442,6 +442,24 @@ ShellRoot {
             JSON.stringify(["Keep sharing garden with WorkingGroup?", "Now answering: puma in ~/my-garden. Everyone in WorkingGroup can open it as themselves, while this computer is on."]))
       barPanel.activate("keepno:garden")
       check("Cancel approves nothing", [fam.doing, barPanel.keeping, JSON.stringify(fam.lastAsked) === before].join("|"), "||true")
+
+      console.log("the second press approves only what the first showed")
+      barPanel.activate("keep:garden")
+      var moved = JSON.parse(JSON.stringify(kept))
+      moved.lends.g1.lent[0].token = "t1b"
+      moved.lends.g1.lent[0].now = { pid: 31, start: 32, program: "node", folder: "~/client-x", said: "node in ~/client-x" }
+      show(moved)
+      check("a read since shows another program there: the question still says what the first press showed",
+            barPanel.keepWords(barPanel.lent[0])[1], "Now answering: puma in ~/my-garden. Everyone in WorkingGroup can open it as themselves, while this computer is on.")
+      barPanel.activate("keepok:garden")
+      check("so the second press approves nothing, closes the question, and says why",
+            [fam.doing, barPanel.keeping, JSON.stringify(fam.lastAsked) === before, fam.said, fam.saidOk].join("|"),
+            "||true|What answers on garden's port changed after you pressed Keep sharing it, so nothing was approved. Press Keep sharing it again to see what answers now.|false")
+      fam.said = ""
+      barPanel.activate("keep:garden")
+      show(kept)
+      check("a read since that shows the same program and token keeps the question as it was", barPanel.keeping, "garden")
+      barPanel.activate("keepno:garden")
       barPanel.open()
       show(kept)
       var content = panelOf(barPanel)
